@@ -2314,28 +2314,25 @@ charLoader.load(
   (err) => { console.warn('character.glb load failed, using fallback:', err); }
 );
 
-// Vi tri rieng cua nhan vat (khong phu thuoc camera offset/yaw)
-const charPos = new THREE.Vector2(0, 5); // x, z ban dau
-
 // Ham update nhan vat (goi trong animate loop)
 function updateCharacter(isMoving) {
   const delta = charClock.getDelta();
 
-  // Tinh huong di chuyen va cap nhat charPos chi khi bam phim
+  // Huong nhan vat: chi cap nhat khi bam phim
   const rawDir = new THREE.Vector3();
   if (keys['w']||keys['arrowup'])    rawDir.z -= 1;
   if (keys['s']||keys['arrowdown'])  rawDir.z += 1;
   if (keys['a']||keys['arrowleft'])  rawDir.x -= 1;
   if (keys['d']||keys['arrowright']) rawDir.x += 1;
-
   if (rawDir.length() > 0) {
     prevCharFacing = yaw + Math.atan2(rawDir.x, rawDir.z);
-    // Di chuyen charPos theo huong camera
-    const moveVec = rawDir.clone().normalize().applyEuler(new THREE.Euler(0, yaw, 0));
-    charPos.x = Math.max(-6.5, Math.min(6.5, charPos.x + moveVec.x * walkSpeed));
-    charPos.y = Math.max(-6.5, Math.min(6.5, charPos.y + moveVec.z * walkSpeed));
   }
   const charFacing = prevCharFacing;
+
+  // Vi tri nhan vat = vi tri camera, offset phia truoc theo lastMoveYaw (khong doi khi xoay chuot)
+  const CHAR_FRONT = 0.35; // khoang cach nhan vat truoc camera
+  const px = camera.position.x + Math.sin(prevCharFacing) * CHAR_FRONT;
+  const pz = camera.position.z + Math.cos(prevCharFacing) * CHAR_FRONT;
 
   if (charReady && playerCharacter) {
     let rot_delta = charFacing - playerCharacter.rotation.y;
@@ -2343,24 +2340,22 @@ function updateCharacter(isMoving) {
     while (rot_delta < -Math.PI) rot_delta += Math.PI * 2;
     playerCharacter.rotation.y += rot_delta * 0.2;
 
-    playerCharacter.position.x = charPos.x;
-    playerCharacter.position.z = charPos.y;
+    playerCharacter.position.x = px;
+    playerCharacter.position.z = pz;
     playerCharacter.position.y = window.__charGroundOffset || 0;
 
     if (isMoving) switchAction(actionWalk || actionIdle);
     else          switchAction(actionIdle);
-
     if (charMixer) charMixer.update(delta);
 
   } else {
-    // Fallback geometry
     let fb_delta = charFacing - fallbackChar.rotation.y;
     while (fb_delta >  Math.PI) fb_delta -= Math.PI * 2;
     while (fb_delta < -Math.PI) fb_delta += Math.PI * 2;
     fallbackChar.rotation.y += fb_delta * 0.2;
 
-    fallbackChar.position.x = charPos.x;
-    fallbackChar.position.z = charPos.y;
+    fallbackChar.position.x = px;
+    fallbackChar.position.z = pz;
     fallbackChar.position.y = 0;
 
     if (isMoving) charWalkPhase += 0.18;
@@ -2389,14 +2384,16 @@ function animate() {
   if (keys['d']||keys['arrowright']) moveDir.x+=1;
 
   const _isMoving = moveDir.length() > 0;
+  if (_isMoving) {
+    moveDir.normalize().applyEuler(new THREE.Euler(0,yaw,0));
+    camera.position.addScaledVector(moveDir, walkSpeed);
+    camera.position.x = Math.max(-7.5, Math.min(7.5, camera.position.x));
+    camera.position.z = Math.max(-7.5, Math.min(7.5, camera.position.z));
+    camera.position.y = 1.7;
+  }
 
-  // Cap nhat nhan vat 3D (tinh charPos ben trong)
+  // Cap nhat nhan vat 3D
   updateCharacter(_isMoving);
-
-  // Camera follow charPos (first-person: camera dat tai vi tri nhan vat)
-  camera.position.x = charPos.x;
-  camera.position.z = charPos.y;
-  camera.position.y = 1.7;
 
   artworks.forEach(a => { if(a.isVideo&&a.tex) a.tex.needsUpdate=true; });
   tickWpTravel();
@@ -2597,12 +2594,12 @@ const _vec3 = new THREE.Vector3();
 function worldToScreen(worldPos) {
   _vec3.copy(worldPos);
   _vec3.project(camera);
-  const w = renderer.domElement.clientWidth;
-  const h = renderer.domElement.clientHeight;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
   return {
     x: (_vec3.x * 0.5 + 0.5) * w,
     y: (-_vec3.y * 0.5 + 0.5) * h,
-    visible: _vec3.z < 1
+    visible: _vec3.z > -1 && _vec3.z < 1
   };
 }
 
