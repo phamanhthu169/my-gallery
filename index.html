@@ -2468,6 +2468,263 @@ if (!localStorage.getItem('gallery_visited')) {
   }, 800);
 }
 
+/* ═══════════════════════════════════════
+   MULTIPLAYER — Realtime Presence
+   Dùng Supabase Broadcast (no DB table needed)
+   Mỗi khách thấy nhau di chuyển + bảng tên
+═══════════════════════════════════════ */
+const MY_ID = Math.random().toString(36).slice(2, 10);
+
+// Map: playerId → { group, labelDiv, walkPhase, lastPos, lastSeen }
+const otherPlayers = new Map();
+
+// Màu ngẫu nhiên cho mỗi người (để phân biệt)
+const PLAYER_COLORS = [
+  0xe07040, 0x40a0e0, 0x60cc80, 0xe060b0,
+  0xd4b030, 0x7060e0, 0xe05050, 0x40c8c0
+];
+function playerColor(id) {
+  let h = 0; for (let i=0; i<id.length; i++) h = (h*31 + id.charCodeAt(i)) >>> 0;
+  return PLAYER_COLORS[h % PLAYER_COLORS.length];
+}
+
+// Tạo fallback geometry cho người khác (giống fallbackChar, màu khác)
+function createOtherPlayerMesh(id) {
+  const col   = playerColor(id);
+  const skin  = new THREE.MeshLambertMaterial({ color: 0xf5c5a3 });
+  const shirt = new THREE.MeshLambertMaterial({ color: col });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x2a2e38 });
+  const shoe  = new THREE.MeshLambertMaterial({ color: 0x1a1208 });
+
+  const g = new THREE.Group();
+  const head  = new THREE.Mesh(new THREE.SphereGeometry(0.13,8,8), skin);
+  head.position.set(0,1.72,0); g.add(head);
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.28,0.35,0.15), shirt);
+  torso.position.set(0,1.38,0); g.add(torso);
+  const armL  = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.04,0.32,6), shirt);
+  armL.position.set(-0.19,1.38,0); armL.rotation.z= 0.15; g.add(armL);
+  const armR  = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.04,0.32,6), shirt);
+  armR.position.set( 0.19,1.38,0); armR.rotation.z=-0.15; g.add(armR);
+  const legLU = new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.06,0.28,6), pants);
+  legLU.position.set(-0.08,1.06,0); g.add(legLU);
+  const legRU = new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.06,0.28,6), pants);
+  legRU.position.set( 0.08,1.06,0); g.add(legRU);
+  const legLL = new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.045,0.28,6), pants);
+  legLL.position.set(-0.08,0.78,0); g.add(legLL);
+  const legRL = new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.045,0.28,6), pants);
+  legRL.position.set( 0.08,0.78,0); g.add(legRL);
+  const shoeL = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.07,0.17), shoe);
+  shoeL.position.set(-0.08,0.635,0.02); g.add(shoeL);
+  const shoeR = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.07,0.17), shoe);
+  shoeR.position.set( 0.08,0.635,0.02); g.add(shoeR);
+
+  g.userData = { legLU, legLL, legRU, legRL, armL, armR, shoeL, shoeR };
+  g.castShadow = true;
+  scene.add(g);
+  return g;
+}
+
+// Tạo bảng tên nổi trên đầu (HTML overlay)
+function createNameLabel(name, id) {
+  const div = document.createElement('div');
+  div.className = 'player-label';
+  div.textContent = name;
+  const col = playerColor(id);
+  const r = (col>>16)&0xff, gr = (col>>8)&0xff, b = col&0xff;
+  div.style.cssText = `
+    position:absolute; pointer-events:none; z-index:18;
+    background:rgba(18,15,12,.88);
+    border:1px solid rgba(${r},${gr},${b},.7);
+    color:rgb(${r},${gr},${b});
+    font-family:'Space Mono',monospace; font-size:9px;
+    letter-spacing:.1em; padding:3px 8px; border-radius:10px;
+    white-space:nowrap; transform:translateX(-50%);
+    text-shadow:0 0 8px rgba(${r},${gr},${b},.5);
+    display:none;
+  `;
+  document.getElementById('wrap').appendChild(div);
+  return div;
+}
+
+// Project 3D world position → 2D screen position
+const _vec3 = new THREE.Vector3();
+function worldToScreen(worldPos) {
+  _vec3.copy(worldPos);
+  _vec3.project(camera);
+  const w = renderer.domElement.clientWidth;
+  const h = renderer.domElement.clientHeight;
+  return {
+    x: (_vec3.x * 0.5 + 0.5) * w,
+    y: (-_vec3.y * 0.5 + 0.5) * h,
+    visible: _vec3.z < 1
+  };
+}
+
+// Cập nhật vị trí bảng tên theo 3D position
+function updateLabelPos(labelDiv, worldPos) {
+  const above = worldPos.clone(); above.y += 2.15; // trên đầu ~2.15 units
+  const s = worldToScreen(above);
+  if (s.visible) {
+    labelDiv.style.display = 'block';
+    labelDiv.style.left = s.x + 'px';
+    labelDiv.style.top  = s.y + 'px';
+  } else {
+    labelDiv.style.display = 'none';
+  }
+}
+
+// Xóa player đã offline
+function removePlayer(id) {
+  const p = otherPlayers.get(id);
+  if (!p) return;
+  scene.remove(p.group);
+  if (p.labelDiv) p.labelDiv.remove();
+  otherPlayers.delete(id);
+}
+
+// Cleanup players không gửi tín hiệu > 8 giây
+setInterval(() => {
+  const now = Date.now();
+  otherPlayers.forEach((p, id) => {
+    if (now - p.lastSeen > 8000) removePlayer(id);
+  });
+}, 3000);
+
+// Xử lý nhận data từ người khác
+function handlePlayerUpdate(payload) {
+  const { id, name, x, z, ry, moving } = payload;
+  if (id === MY_ID) return; // bỏ qua chính mình
+
+  let p = otherPlayers.get(id);
+  if (!p) {
+    // Người mới vào
+    const group    = createOtherPlayerMesh(id);
+    const labelDiv = createNameLabel(name || ('Khách_' + id.slice(0,4)), id);
+    p = { group, labelDiv, walkPhase: 0, lastSeen: Date.now(), moving: false,
+          targetX: x, targetZ: z, targetRY: ry };
+    group.position.set(x, 0, z);
+    group.rotation.y = ry;
+    otherPlayers.set(id, p);
+  }
+
+  // Cập nhật target để nội suy mượt
+  p.targetX   = x;
+  p.targetZ   = z;
+  p.targetRY  = ry;
+  p.moving    = moving;
+  p.lastSeen  = Date.now();
+
+  // Cập nhật tên nếu đổi
+  if (name && p.labelDiv) p.labelDiv.textContent = name;
+}
+
+// Nội suy chuyển động người khác mỗi frame (lerp)
+function updateOtherPlayers() {
+  otherPlayers.forEach((p) => {
+    const g = p.group;
+
+    // Lerp vị trí
+    g.position.x += (p.targetX - g.position.x) * 0.15;
+    g.position.z += (p.targetZ - g.position.z) * 0.15;
+    g.position.y = 0;
+
+    // Lerp rotation
+    let rd = (p.targetRY || 0) - g.rotation.y;
+    while (rd >  Math.PI) rd -= Math.PI * 2;
+    while (rd < -Math.PI) rd += Math.PI * 2;
+    g.rotation.y += rd * 0.15;
+
+    // Walk animation fallback
+    if (p.moving) p.walkPhase = (p.walkPhase || 0) + 0.18;
+    else          p.walkPhase = (p.walkPhase || 0) * 0.85;
+    const sw = Math.sin(p.walkPhase);
+    const ud = g.userData;
+    ud.legLU.rotation.x =  sw * 0.45;
+    ud.legLL.rotation.x = -Math.max(0, sw) * 0.4;
+    ud.legRU.rotation.x = -sw * 0.45;
+    ud.legRL.rotation.x =  Math.max(0, -sw) * 0.4;
+    ud.armL.rotation.x  = -sw * 0.4;
+    ud.armR.rotation.x  =  sw * 0.4;
+
+    // Cập nhật label
+    updateLabelPos(p.labelDiv, g.position);
+  });
+}
+
+// Kết nối Supabase Realtime Broadcast channel
+const presenceChannel = supabase.channel('gallery-presence-v1', {
+  config: { broadcast: { self: false } }
+});
+
+presenceChannel
+  .on('broadcast', { event: 'move' }, ({ payload }) => {
+    if (payload.offline) { removePlayer(payload.id); return; }
+    handlePlayerUpdate(payload);
+  })
+  .subscribe((status) => {
+    if (status === 'SUBSCRIBED') {
+      broadcastPosition(false);
+    }
+  });
+
+// Gửi vị trí hiện tại
+let lastBroadcastX = null, lastBroadcastZ = null;
+function broadcastPosition(moving) {
+  const charObj = (charReady && playerCharacter) ? playerCharacter : fallbackChar;
+  const cx = charObj.position.x;
+  const cz = charObj.position.z;
+  // Chỉ gửi nếu vị trí thay đổi hoặc moving state thay đổi
+  presenceChannel.send({
+    type: 'broadcast',
+    event: 'move',
+    payload: {
+      id:     MY_ID,
+      name:   username,
+      x:      Math.round(cx * 1000) / 1000,
+      z:      Math.round(cz * 1000) / 1000,
+      ry:     Math.round(((charReady && playerCharacter) ? playerCharacter.rotation.y : fallbackChar.rotation.y) * 1000) / 1000,
+      moving: moving
+    }
+  });
+  lastBroadcastX = cx; lastBroadcastZ = cz;
+}
+
+// Gửi vị trí ~10 lần/giây
+let broadcastTick = 0;
+const _origAnimate = animate;
+// Patch vào animate loop: gọi updateOtherPlayers mỗi frame,
+// broadcast mỗi ~6 frame (~10fps tại 60fps)
+const _patchedUpdate = () => {
+  broadcastTick++;
+  if (broadcastTick % 6 === 0) {
+    const charObj = (charReady && playerCharacter) ? playerCharacter : fallbackChar;
+    const isMoving2 = (Math.abs(charObj.position.x - (lastBroadcastX||0)) > 0.001 ||
+                       Math.abs(charObj.position.z - (lastBroadcastZ||0)) > 0.001);
+    broadcastPosition(isMoving2);
+  }
+  updateOtherPlayers();
+};
+
+// Hook vào animate loop bằng cách override renderer.render
+const _origRender = renderer.render.bind(renderer);
+renderer.render = function(s, c) {
+  _origRender(s, c);
+  _patchedUpdate();
+};
+
+// Khi user đổi tên → broadcast lại
+document.getElementById('chat-username-tag').addEventListener('click', () => {
+  setTimeout(() => broadcastPosition(false), 200);
+});
+
+// Gửi "offline" khi tab đóng/rời đi
+window.addEventListener('beforeunload', () => {
+  presenceChannel.send({
+    type: 'broadcast', event: 'move',
+    payload: { id: MY_ID, name: username, x: 9999, z: 9999, ry: 0, moving: false, offline: true }
+  });
+});
+
 })();
 </script>
 </body>
