@@ -1093,7 +1093,7 @@ window.addEventListener('mousemove', e => {
   if (!drag) return;
   yaw   -= (e.clientX - lx) * .004;
   pitch -= (e.clientY - ly) * .003;
-  pitch  = Math.max(-1.05, Math.min(1.05, pitch));
+  pitch  = Math.max(-0.8, Math.min(0.3, pitch)); // gioi han de luon thay nhan vat
   lx = e.clientX; ly = e.clientY;
 });
 
@@ -1175,7 +1175,7 @@ function animate() {
     const isTurning = false; // don gian hoa, bo turn detection
 
     // Đặt nhân vật phía trước camera
-    const offset = new THREE.Vector3(0, 0, -4.0);
+    const offset = new THREE.Vector3(0, 0, -2.0);
     offset.applyEuler(new THREE.Euler(0, yaw, 0));
 
     if (charReady && playerCharacter) {
@@ -1186,8 +1186,15 @@ function animate() {
       while (rot_delta < -Math.PI) rot_delta += Math.PI * 2;
       playerCharacter.rotation.y += rot_delta * 0.2;
 
-      playerCharacter.position.x = camera.position.x + offset.x;
-      playerCharacter.position.z = camera.position.z + offset.z;
+      // Chi di chuyen nhan vat khi bam phim, khong keo theo khi xoay chuot
+      if (isMoving) {
+        // Tinh vi tri moi theo huong di chuyen
+        const newX = camera.position.x + offset.x;
+        const newZ = camera.position.z + offset.z;
+        // Giu trong phong (tuong o +-7.5, de nhan vat cach tuong 1 don vi)
+        playerCharacter.position.x = Math.max(-6.5, Math.min(6.5, newX));
+        playerCharacter.position.z = Math.max(-6.5, Math.min(6.5, newZ));
+      }
       playerCharacter.position.y = window.__charGroundOffset || 0;
 
       // Switch animation theo trạng thái
