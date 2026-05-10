@@ -692,8 +692,8 @@ charLoader.load(
     // Mixamo export cm -> model rat nho (0.006 don vi), can scale lon
     const box    = new THREE.Box3().setFromObject(playerCharacter);
     const size   = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const scl    = 1.7 / (maxDim > 0 ? maxDim : 1);
+    // Dung chieu cao Y de scale (tranh bi sai do tay/chan lam maxDim lon)
+    const scl    = 1.7 / (size.y > 0 ? size.y : 1);
     playerCharacter.scale.setScalar(scl);
 
     // Tinh lai box sau khi scale de chan cham dung mat san
@@ -1178,7 +1178,7 @@ function animate() {
     prevCharFacing = charFacing;
 
     // Đặt nhân vật phía trước camera
-    const offset = new THREE.Vector3(0, 0, -1.1);
+    const offset = new THREE.Vector3(0, 0, -2.2);
     offset.applyEuler(new THREE.Euler(0, yaw, 0));
 
     if (charReady && playerCharacter) {
