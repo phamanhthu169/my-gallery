@@ -2268,14 +2268,8 @@ charLoader.load(
   (gltf) => {
     playerCharacter = gltf.scene;
 
-    // Scale dua vao chieu cao thuc cua model
-    const box  = new THREE.Box3().setFromObject(playerCharacter);
-    const size = box.getSize(new THREE.Vector3());
-    const scl  = size.y > 0 ? 1.7 / size.y : 1;
-    playerCharacter.scale.setScalar(scl);
-
-    // Can chan cham san
-    playerCharacter.updateMatrixWorld(true);
+    // Model Mixamo export cm -> size.y~0.006, khong can scale
+    // Giu nguyen scale = 1, chi can chan cham san
     const box2 = new THREE.Box3().setFromObject(playerCharacter);
     window.__charGroundOffset = -box2.min.y;
 
