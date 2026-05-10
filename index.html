@@ -1186,15 +1186,15 @@ function animate() {
       while (rot_delta < -Math.PI) rot_delta += Math.PI * 2;
       playerCharacter.rotation.y += rot_delta * 0.2;
 
-      // Chi di chuyen nhan vat khi bam phim, khong keo theo khi xoay chuot
-      if (isMoving) {
-        // Tinh vi tri moi theo huong di chuyen
-        const newX = camera.position.x + offset.x;
-        const newZ = camera.position.z + offset.z;
-        // Giu trong phong (tuong o +-7.5, de nhan vat cach tuong 1 don vi)
-        playerCharacter.position.x = Math.max(-6.5, Math.min(6.5, newX));
-        playerCharacter.position.z = Math.max(-6.5, Math.min(6.5, newZ));
-      }
+      // Nhan vat luon o phia truoc camera theo chieu ngang (yaw)
+      // Khong bi anh huong boi pitch (ngang/cui camera)
+      const charOffset = new THREE.Vector3(0, 0, -2.0);
+      charOffset.applyEuler(new THREE.Euler(0, yaw, 0)); // chi dung yaw, bo pitch
+      const newX = camera.position.x + charOffset.x;
+      const newZ = camera.position.z + charOffset.z;
+      // Giu trong phong
+      playerCharacter.position.x = Math.max(-6.5, Math.min(6.5, newX));
+      playerCharacter.position.z = Math.max(-6.5, Math.min(6.5, newZ));
       playerCharacter.position.y = window.__charGroundOffset || 0;
 
       // Switch animation theo trạng thái
