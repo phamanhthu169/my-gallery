@@ -693,7 +693,7 @@ charLoader.load(
     const box    = new THREE.Box3().setFromObject(playerCharacter);
     const size   = box.getSize(new THREE.Vector3());
     // Dung chieu cao Y de scale (tranh bi sai do tay/chan lam maxDim lon)
-    const scl    = 1.7 / (size.y > 0 ? size.y : 1);
+    const scl    = 0.8 / (size.y > 0 ? size.y : 1);
     playerCharacter.scale.setScalar(scl);
 
     // Tinh lai box sau khi scale de chan cham dung mat san
@@ -1178,7 +1178,7 @@ function animate() {
     prevCharFacing = charFacing;
 
     // Đặt nhân vật phía trước camera
-    const offset = new THREE.Vector3(0, 0, -2.2);
+    const offset = new THREE.Vector3(0, 0, -4.0);
     offset.applyEuler(new THREE.Euler(0, yaw, 0));
 
     if (charReady && playerCharacter) {
