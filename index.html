@@ -693,10 +693,8 @@ charLoader.load(
     const box    = new THREE.Box3().setFromObject(playerCharacter);
     const size   = box.getSize(new THREE.Vector3());
     // Dung chieu cao Y de scale (tranh bi sai do tay/chan lam maxDim lon)
-    const targetHeight = 1.7;
-    const scl = size.y > 0 ? targetHeight / size.y : 1;
-    playerCharacter.scale.setScalar(scl);
-    console.log('size.y=', size.y, 'scl=', scl);
+    // Model Mixamo don vi cm, size.y~0.006 la dung roi, khong can scale
+    // Giu nguyen scale = 1, chi can can chan cham san
 
     // Tinh lai box sau khi scale de chan cham dung mat san
     playerCharacter.updateMatrixWorld(true);
