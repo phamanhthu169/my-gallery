@@ -949,6 +949,7 @@ body { background:#1a1714; overflow:hidden; font-family:var(--font-ui); }
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
 
 <!-- Expose GLTFLoader ra window de dung trong type="module" -->
 <script>
@@ -2504,22 +2505,24 @@ const _pendingSpawn = [];
 
 // Tạo nhân vật GLB clone cho người khác
 function createOtherPlayerFromGLB(id) {
-  if (!_glbSource) return null; // chưa có source
+  if (!_glbSource) return null;
 
-  // Clone toàn bộ scene GLB
-  const cloned = _glbSource.scene.clone(true);
-  const box = new THREE.Box3().setFromObject(cloned);
-  const groundOffset = -box.min.y;
+  // Dùng SkeletonUtils.clone để clone đúng SkinnedMesh + skeleton
+  const cloned = THREE.SkeletonUtils
+    ? THREE.SkeletonUtils.clone(_glbSource.scene)
+    : _glbSource.scene.clone(true);
 
   cloned.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
-  cloned.position.y = groundOffset;
 
-  // Bọc trong group để điều khiển vị trí/rotation riêng
+  // Dùng groundOffset từ player chính (đã tính sẵn)
+  const gOffset = window.__charGroundOffset || 0;
+  cloned.position.y = gOffset;
+
   const group = new THREE.Group();
   group.add(cloned);
   scene.add(group);
 
-  // AnimationMixer riêng
+  // AnimationMixer riêng cho clone này
   const mixer = new THREE.AnimationMixer(cloned);
   const clips = _glbSource.animations;
   const findClip = (name) => clips.find(c => c.name.toLowerCase() === name) || null;
