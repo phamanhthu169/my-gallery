@@ -689,12 +689,19 @@ charLoader.load(
     playerCharacter = gltf.scene;
 
     // Scale nhân vật về chiều cao ~1.7m
-    const box  = new THREE.Box3().setFromObject(playerCharacter);
-    const size = box.getSize(new THREE.Vector3());
-    const scl  = 1.7 / size.y;
+    // Mixamo export cm -> model rat nho (0.006 don vi), can scale lon
+    const box    = new THREE.Box3().setFromObject(playerCharacter);
+    const size   = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const scl    = 1.7 / (maxDim > 0 ? maxDim : 1);
     playerCharacter.scale.setScalar(scl);
 
-    // Bật shadow cho toàn bộ mesh trong model
+    // Tinh lai box sau khi scale de chan cham dung mat san
+    playerCharacter.updateMatrixWorld(true);
+    const box2 = new THREE.Box3().setFromObject(playerCharacter);
+    window.__charGroundOffset = -box2.min.y;
+
+    // Bat shadow cho toan bo mesh trong model
     playerCharacter.traverse(c => {
       if (c.isMesh) {
         c.castShadow    = true;
@@ -1184,7 +1191,7 @@ function animate() {
 
       playerCharacter.position.x = camera.position.x + offset.x;
       playerCharacter.position.z = camera.position.z + offset.z;
-      playerCharacter.position.y = 0;
+      playerCharacter.position.y = window.__charGroundOffset || 0;
 
       // Switch animation theo trạng thái
       if (isMoving) {
