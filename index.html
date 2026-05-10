@@ -2292,6 +2292,22 @@ charLoader.load(
     if (actionIdle) { actionIdle.play(); currentAction = actionIdle; }
 
     charReady = true;
+
+  // Lưu source để multiplayer clone
+  _glbSource = gltf;
+
+  // Nếu có player đang dùng fallback, upgrade lên GLB
+  otherPlayers.forEach((p, id) => {
+    if (p.group.userData && p.group.userData.isFallback) {
+      // Xóa fallback, tạo lại bằng GLB
+      scene.remove(p.group);
+      const meshData = createOtherPlayerFromGLB(id);
+      const pos = { x: p.targetX, z: p.targetZ, ry: p.targetRY };
+      meshData.group.position.set(pos.x, meshData.group.position.y, pos.z);
+      meshData.group.rotation.y = pos.ry;
+      Object.assign(p, meshData);
+    }
+  });
   },
   null,
   (err) => { console.warn('character.glb load failed, using fallback:', err); }
@@ -2472,30 +2488,63 @@ if (!localStorage.getItem('gallery_visited')) {
    MULTIPLAYER — Realtime Presence
    Dùng Supabase Broadcast (no DB table needed)
    Mỗi khách thấy nhau di chuyển + bảng tên
+   Dùng character.glb clone cho tất cả mọi người
 ═══════════════════════════════════════ */
 const MY_ID = Math.random().toString(36).slice(2, 10);
 
-// Map: playerId → { group, labelDiv, walkPhase, lastPos, lastSeen }
+// Map: playerId → { group, mixer, actionIdle, actionWalk, currentAction, labelDiv, lastSeen, targetX, targetZ, targetRY, moving }
 const otherPlayers = new Map();
 
-// Màu ngẫu nhiên cho mỗi người (để phân biệt)
-const PLAYER_COLORS = [
-  0xe07040, 0x40a0e0, 0x60cc80, 0xe060b0,
-  0xd4b030, 0x7060e0, 0xe05050, 0x40c8c0
-];
-function playerColor(id) {
-  let h = 0; for (let i=0; i<id.length; i++) h = (h*31 + id.charCodeAt(i)) >>> 0;
-  return PLAYER_COLORS[h % PLAYER_COLORS.length];
+// Cache GLB gốc để clone (set khi charLoader load xong)
+// charGltfSource được set sau khi charLoader.load thành công
+let _glbSource = null; // { scene, animations }
+
+// Hàng chờ: nếu GLB chưa load xong thì buffer lại payload
+const _pendingSpawn = [];
+
+// Tạo nhân vật GLB clone cho người khác
+function createOtherPlayerFromGLB(id) {
+  if (!_glbSource) return null; // chưa có source
+
+  // Clone toàn bộ scene GLB
+  const cloned = _glbSource.scene.clone(true);
+  const box = new THREE.Box3().setFromObject(cloned);
+  const groundOffset = -box.min.y;
+
+  cloned.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+  cloned.position.y = groundOffset;
+
+  // Bọc trong group để điều khiển vị trí/rotation riêng
+  const group = new THREE.Group();
+  group.add(cloned);
+  scene.add(group);
+
+  // AnimationMixer riêng
+  const mixer = new THREE.AnimationMixer(cloned);
+  const clips = _glbSource.animations;
+  const findClip = (name) => clips.find(c => c.name.toLowerCase() === name) || null;
+  const idleClip = findClip('idle');
+  const walkClip = findClip('walk');
+  let aIdle = null, aWalk = null, aCurrent = null;
+  if (idleClip) { aIdle = mixer.clipAction(idleClip); aIdle.play(); aCurrent = aIdle; }
+  if (walkClip) { aWalk = mixer.clipAction(walkClip); }
+
+  return { group, mixer, actionIdle: aIdle, actionWalk: aWalk, currentAction: aCurrent };
 }
 
-// Tạo fallback geometry cho người khác (giống fallbackChar, màu khác)
-function createOtherPlayerMesh(id) {
-  const col   = playerColor(id);
+function switchOtherAction(p, next) {
+  if (!next || next === p.currentAction) return;
+  if (p.currentAction) p.currentAction.fadeOut(0.25);
+  next.reset().fadeIn(0.25).play();
+  p.currentAction = next;
+}
+
+// Fallback: tạo fallback geometry nếu GLB chưa load
+function createOtherPlayerFallback() {
   const skin  = new THREE.MeshLambertMaterial({ color: 0xf5c5a3 });
-  const shirt = new THREE.MeshLambertMaterial({ color: col });
+  const shirt = new THREE.MeshLambertMaterial({ color: 0x3a5fcd });
   const pants = new THREE.MeshLambertMaterial({ color: 0x2a2e38 });
   const shoe  = new THREE.MeshLambertMaterial({ color: 0x1a1208 });
-
   const g = new THREE.Group();
   const head  = new THREE.Mesh(new THREE.SphereGeometry(0.13,8,8), skin);
   head.position.set(0,1.72,0); g.add(head);
@@ -2517,29 +2566,25 @@ function createOtherPlayerMesh(id) {
   shoeL.position.set(-0.08,0.635,0.02); g.add(shoeL);
   const shoeR = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.07,0.17), shoe);
   shoeR.position.set( 0.08,0.635,0.02); g.add(shoeR);
-
-  g.userData = { legLU, legLL, legRU, legRL, armL, armR, shoeL, shoeR };
-  g.castShadow = true;
+  g.userData = { legLU, legLL, legRU, legRL, armL, armR, shoeL, shoeR, isFallback: true };
   scene.add(g);
-  return g;
+  return { group: g, mixer: null, actionIdle: null, actionWalk: null, currentAction: null };
 }
 
 // Tạo bảng tên nổi trên đầu (HTML overlay)
-function createNameLabel(name, id) {
+function createNameLabel(name) {
   const div = document.createElement('div');
   div.className = 'player-label';
   div.textContent = name;
-  const col = playerColor(id);
-  const r = (col>>16)&0xff, gr = (col>>8)&0xff, b = col&0xff;
   div.style.cssText = `
     position:absolute; pointer-events:none; z-index:18;
     background:rgba(18,15,12,.88);
-    border:1px solid rgba(${r},${gr},${b},.7);
-    color:rgb(${r},${gr},${b});
+    border:1px solid rgba(200,169,110,.7);
+    color:#d4c5a9;
     font-family:'Space Mono',monospace; font-size:9px;
     letter-spacing:.1em; padding:3px 8px; border-radius:10px;
     white-space:nowrap; transform:translateX(-50%);
-    text-shadow:0 0 8px rgba(${r},${gr},${b},.5);
+    text-shadow:0 0 8px rgba(200,169,110,.4);
     display:none;
   `;
   document.getElementById('wrap').appendChild(div);
@@ -2578,6 +2623,7 @@ function removePlayer(id) {
   const p = otherPlayers.get(id);
   if (!p) return;
   scene.remove(p.group);
+  if (p.mixer) p.mixer.stopAllAction();
   if (p.labelDiv) p.labelDiv.remove();
   otherPlayers.delete(id);
 }
@@ -2597,36 +2643,45 @@ function handlePlayerUpdate(payload) {
 
   let p = otherPlayers.get(id);
   if (!p) {
-    // Người mới vào
-    const group    = createOtherPlayerMesh(id);
-    const labelDiv = createNameLabel(name || ('Khách_' + id.slice(0,4)), id);
-    p = { group, labelDiv, walkPhase: 0, lastSeen: Date.now(), moving: false,
-          targetX: x, targetZ: z, targetRY: ry };
-    group.position.set(x, 0, z);
-    group.rotation.y = ry;
+    // Người mới vào — thử dùng GLB clone, fallback nếu chưa load
+    const meshData = _glbSource ? createOtherPlayerFromGLB(id) : createOtherPlayerFallback();
+    const labelDiv = createNameLabel(name || ('Khách_' + id.slice(0,4)));
+    p = {
+      ...meshData,
+      labelDiv,
+      walkPhase: 0,
+      lastSeen:  Date.now(),
+      moving:    false,
+      targetX:   x,
+      targetZ:   z,
+      targetRY:  ry
+    };
+    p.group.position.set(x, p.group.position.y, z);
+    p.group.rotation.y = ry;
     otherPlayers.set(id, p);
   }
 
   // Cập nhật target để nội suy mượt
-  p.targetX   = x;
-  p.targetZ   = z;
-  p.targetRY  = ry;
-  p.moving    = moving;
-  p.lastSeen  = Date.now();
+  p.targetX  = x;
+  p.targetZ  = z;
+  p.targetRY = ry;
+  p.moving   = moving;
+  p.lastSeen = Date.now();
 
   // Cập nhật tên nếu đổi
   if (name && p.labelDiv) p.labelDiv.textContent = name;
 }
 
 // Nội suy chuyển động người khác mỗi frame (lerp)
+const _otherClock = new THREE.Clock();
 function updateOtherPlayers() {
+  const delta = _otherClock.getDelta();
   otherPlayers.forEach((p) => {
     const g = p.group;
 
-    // Lerp vị trí
+    // Lerp vị trí (giữ nguyên y)
     g.position.x += (p.targetX - g.position.x) * 0.15;
     g.position.z += (p.targetZ - g.position.z) * 0.15;
-    g.position.y = 0;
 
     // Lerp rotation
     let rd = (p.targetRY || 0) - g.rotation.y;
@@ -2634,17 +2689,26 @@ function updateOtherPlayers() {
     while (rd < -Math.PI) rd += Math.PI * 2;
     g.rotation.y += rd * 0.15;
 
-    // Walk animation fallback
-    if (p.moving) p.walkPhase = (p.walkPhase || 0) + 0.18;
-    else          p.walkPhase = (p.walkPhase || 0) * 0.85;
-    const sw = Math.sin(p.walkPhase);
-    const ud = g.userData;
-    ud.legLU.rotation.x =  sw * 0.45;
-    ud.legLL.rotation.x = -Math.max(0, sw) * 0.4;
-    ud.legRU.rotation.x = -sw * 0.45;
-    ud.legRL.rotation.x =  Math.max(0, -sw) * 0.4;
-    ud.armL.rotation.x  = -sw * 0.4;
-    ud.armR.rotation.x  =  sw * 0.4;
+    if (p.mixer) {
+      // GLB clone: switch idle/walk animation
+      if (p.moving) switchOtherAction(p, p.actionWalk || p.actionIdle);
+      else          switchOtherAction(p, p.actionIdle);
+      p.mixer.update(delta);
+    } else {
+      // Fallback geometry animation
+      if (p.moving) p.walkPhase = (p.walkPhase || 0) + 0.18;
+      else          p.walkPhase = (p.walkPhase || 0) * 0.85;
+      const sw = Math.sin(p.walkPhase);
+      const ud = g.userData;
+      if (ud.legLU) {
+        ud.legLU.rotation.x =  sw * 0.45;
+        ud.legLL.rotation.x = -Math.max(0, sw) * 0.4;
+        ud.legRU.rotation.x = -sw * 0.45;
+        ud.legRL.rotation.x =  Math.max(0, -sw) * 0.4;
+        ud.armL.rotation.x  = -sw * 0.4;
+        ud.armR.rotation.x  =  sw * 0.4;
+      }
+    }
 
     // Cập nhật label
     updateLabelPos(p.labelDiv, g.position);
