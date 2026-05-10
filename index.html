@@ -1164,19 +1164,15 @@ function animate() {
     if (keys['a'] || keys['arrowleft'])  rawDir.x -= 1;
     if (keys['d'] || keys['arrowright']) rawDir.x += 1;
 
-    // Ghi nho huong cuoi cung khi di chuyen, khong tu quay lai nhin camera
+    // Neu dang di: cap nhat huong theo phim bam
+    // Neu dung: giu nguyen huong cuoi, khong quay lai nhin camera
     if (rawDir.length() > 0) {
       const moveAngle = Math.atan2(rawDir.x, rawDir.z);
-      prevCharFacing = yaw + moveAngle; // cap nhat huong moi nhat
+      prevCharFacing = yaw + moveAngle;
     }
-    const charFacing = prevCharFacing; // giu nguyen huong cuoi
-
-    // Tính góc quay (để phát hiện "turn" đột ngột)
-    let delta_angle = charFacing - prevCharFacing;
-    while (delta_angle >  Math.PI) delta_angle -= Math.PI * 2;
-    while (delta_angle < -Math.PI) delta_angle += Math.PI * 2;
-    const isTurning = Math.abs(delta_angle) > 0.25 && !isMoving;
-    prevCharFacing = charFacing;
+    // charFacing luon = huong cuoi cung da di, khong doi khi dung
+    const charFacing = prevCharFacing;
+    const isTurning = false; // don gian hoa, bo turn detection
 
     // Đặt nhân vật phía trước camera
     const offset = new THREE.Vector3(0, 0, -4.0);
