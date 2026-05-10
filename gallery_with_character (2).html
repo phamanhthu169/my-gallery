@@ -1,0 +1,1464 @@
+html
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Gallery</title>
+
+<!-- =====================================================================
+  FONT & EXTERNAL STYLES
+  Bạn có thể thay đổi font chữ ở đây mà không ảnh hưởng gì đến logic
+====================================================================== -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Space+Mono:wght@400&display=swap" rel="stylesheet">
+
+<style>
+/* =====================================================================
+   [UI] RESET & BIẾN MÀU TOÀN CỤC
+   Chỉnh palette, font ở đây — an toàn để sửa
+====================================================================== */
+:root {
+  --bg:        #0f0d0a;
+  --surface:   rgba(20,18,14,.92);
+  --border:    rgba(212,197,169,.18);
+  --border-hi: rgba(212,197,169,.55);
+  --gold:      #d4c5a9;
+  --gold-dim:  #7a6e5c;
+  --text-dim:  #555;
+  --accent:    #c8a96e;
+  --danger:    #b54a3a;
+  --radius:    2px;
+  --font-ui:   'Space Mono', monospace;
+  --font-head: 'Cormorant Garamond', serif;
+}
+
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+/* =====================================================================
+   [UI] CANVAS & WRAPPER CHÍNH
+====================================================================== */
+#c {
+  display: block;
+  width: 100%;
+  height: 600px;
+  cursor: crosshair;
+  transition: cursor .15s;
+}
+#c.walk-mode { cursor: grab; }
+#c.walk-mode:active { cursor: grabbing; }
+
+#wrap {
+  position: relative;
+  user-select: none;
+  font-family: var(--font-ui);
+  background: var(--bg);
+}
+
+/* =====================================================================
+   [UI] THANH TIÊU ĐỀ (HEADER BAR) — thêm mới
+   Hiển thị tên gallery + trạng thái save
+====================================================================== */
+#header {
+  position: absolute;
+  top: 0; left: 0; right: 148px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: linear-gradient(to bottom, rgba(15,13,10,.95) 0%, rgba(15,13,10,0) 100%);
+  z-index: 10;
+  pointer-events: none;
+}
+#gallery-title {
+  font-family: var(--font-head);
+  font-size: 18px;
+  font-weight: 300;
+  font-style: italic;
+  color: var(--gold);
+  letter-spacing: .12em;
+}
+#save-status {
+  font-size: 8px;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  transition: color .3s;
+}
+#save-status.saved   { color: #6aaa7a; }
+#save-status.saving  { color: var(--accent); }
+#save-status.error   { color: var(--danger); }
+
+/* =====================================================================
+   [UI] TOOLBAR BUTTONS (giữa phía trên)
+====================================================================== */
+#ui {
+  position: absolute;
+  top: 10px;
+  left: calc(50% - 74px - 74px);   /* dịch sang trái để nhường header */
+  transform: translateX(-50%);
+  display: flex;
+  gap: 5px;
+  z-index: 10;
+}
+
+.btn {
+  background-image: linear-gradient(to bottom, rgba(250, 172, 255, 1) 0%,rgba(255, 255, 255, 1) 48%,rgba(6, 69, 255, 1) 100%);
+  background-color: rgba(20,18,14,.6);
+  color: #e8d8ff;
+  border: 1px solid transparent;
+  border-image: linear-gradient(to bottom, rgba(226,147,255,1) 0%, rgba(154,166,255,0) 100%) 1;
+  box-shadow: 0px 2px 2px 0px rgba(40,52,255,0.616);
+  padding: 7px 12px;
+  font-size: 9px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  font:normal none 400 14/1.2 "Special Gothic Expanded One";
+  transition: all .2s;
+  border-radius: var(--radius);
+  position: relative;
+  white-space: nowrap;
+}
+.btn:hover, .btn.active {
+  background-image: linear-gradient(to bottom, rgba(250,172,255,0.85) 0%, rgba(65,112,255,0.2) 50%, rgba(6,69,255,0.9) 98%);
+  color: #fff;
+  box-shadow: 0px 3px 8px 0px rgba(40,52,255,0.7);
+}
+.btn.danger:hover {
+  background-image: linear-gradient(to bottom, rgba(255,100,100,0.4) 0%, rgba(181,74,58,0) 50%, rgba(181,74,58,0.6) 98%);
+  border-image: linear-gradient(to bottom, rgba(255,120,120,1) 0%, rgba(181,74,58,0) 100%) 1;
+  color: #ffaaaa;
+  box-shadow: 0px 2px 6px 0px rgba(181,74,58,0.6);
+}
+
+/* Tooltip */
+.btn[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: -26px; left: 50%; transform: translateX(-50%);
+  background: rgba(20,18,14,.95);
+  color: var(--gold-dim);
+  font-size: 7px;
+  letter-spacing: .1em;
+  padding: 3px 7px;
+  border: .5px solid var(--border);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s;
+  border-radius: var(--radius);
+}
+.btn[data-tip]:hover::after { opacity: 1; }
+
+/* =====================================================================
+   [UI] INFO BAR (phía dưới giữa)
+====================================================================== */
+#info {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(calc(-50% - 74px));  /* canh lệch panel */
+  background: linear-gradient(to bottom, rgba(250, 172, 255, 1) 0%,rgba(255, 255, 255, 1) 48%,rgba(6, 69, 255, 1) 100%);
+  color: var(--gold-dim);
+  border: .5px solid var(--border);
+  padding: 6px 16px;
+  font-size: 8px;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  pointer-events: none;
+  white-space: nowrap;
+   border-radius:50px;
+  backdrop-filter: blur(4px);
+}
+
+/* =====================================================================
+   [UI] PANEL BÊN PHẢI
+====================================================================== */
+#panel {
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 160px;
+  background: rgba(143, 210, 243, 1);
+  border-left: .5px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+  overflow-y: auto;
+}
+#panel::-webkit-scrollbar { width: 3px; }
+#panel::-webkit-scrollbar-thumb { background: rgba(212,197,169,.15); }
+
+/* Panel header */
+.ph {
+  color: var(--gold);
+  font-family: var(--font-head);
+  font-size: 13px;
+  font-style: italic;
+  font-weight: 300;
+  letter-spacing: .1em;
+  padding: 12px 12px 8px;
+  border-bottom: .5px solid var(--border);
+}
+
+/* Section label */
+.sl {
+  color: var(--text-dim);
+  font-size: 7px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  padding: 9px 12px 4px;
+}
+
+/* Thumbnail grid */
+.tg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px 10px;
+}
+.thumb {
+  aspect-ratio: 4/3;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: border-color .2s;
+  display: block;
+  width: 100%;
+  border-radius: var(--radius);
+}
+.thumb:hover, .thumb.sel { border-color: var(--gold); }
+
+/* Upload zone */
+.uz {
+  margin: 5px 10px;
+  padding: 10px 5px;
+  text-align: center;
+  cursor: pointer;
+  background-image: linear-gradient(to bottom, rgba(250,172,255,0.676) 0%, rgba(65,112,255,0) 50%, rgba(6,69,255,0.75) 98%);
+  background-color: rgba(20,18,14,.6);
+font-family: 'Special Gothic Expanded One;', serif;
+  color: linear-gradient(to bottom, rgba(255, 255, 255, 1) 23%,rgba(27, 152, 234, 1) 100%);
+  border: 1px solid transparent;
+  border-image: linear-gradient(to bottom, rgba(226,147,255,1) 0%, rgba(154,166,255,0) 100%) 1;
+  box-shadow: 0px 2px 2px 0px rgba(40,52,255,0.616);
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  line-height: 1.8;
+  transition: all .2s;
+  border-radius: var(--radius);
+}
+.uz:hover {
+  background-image: linear-gradient(to bottom, rgba(250,172,255,0.85) 0%, rgba(65,112,255,0.2) 50%, rgba(6,69,255,0.9) 98%);
+  color: #fff;
+  box-shadow: 0px 3px 8px 0px rgba(40,52,255,0.7);
+}
+
+/* Upload widgets */
+.uw { padding: 3px 10px; }
+.uth {
+  width: 100%; aspect-ratio: 4/3;
+  object-fit: cover;
+  display: block;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: border-color .2s;
+  margin-bottom: 2px;
+  background: #1a1814;
+  border-radius: var(--radius);
+}
+.uth:hover, .uth.sel { border-color: var(--gold); }
+.utl {
+  font-size: 7px;
+  color: var(--text-dim);
+  letter-spacing: .06em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 5px;
+}
+.model-thumb {
+  width: 100%; aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: border-color .2s;
+  margin-bottom: 2px;
+  background: #111;
+  border-radius: var(--radius);
+}
+.model-thumb:hover, .model-thumb.sel { border-color: var(--gold); }
+
+/* =====================================================================
+   [UI] HINT TEXT (dưới cùng panel)
+====================================================================== */
+#hint {
+  color: var(--text-dim);
+  font-size: 7px;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  padding: 10px 12px;
+  line-height: 2;
+  border-top: .5px solid rgba(212,197,169,.08);
+  margin-top: auto;
+}
+
+/* =====================================================================
+   [UI] LOADING OVERLAY
+====================================================================== */
+#loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15,13,10,.88);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  backdrop-filter: blur(2px);
+}
+#loading-overlay.show { display: flex; }
+.ld-txt {
+  color: var(--gold);
+  font-size: 9px;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+.ld-bar {
+  width: 140px;
+  height: 1px;
+  background: rgba(212,197,169,.12);
+}
+.ld-fill {
+  height: 100%;
+  background: var(--gold);
+  width: 0%;
+  transition: width .3s;
+}
+
+/* =====================================================================
+   [UI] THÔNG BÁO TOAST (thêm mới — thay thế alert())
+====================================================================== */
+#toast {
+  position: absolute;
+  bottom: 50px;
+  left: 50%;
+  transform: translateX(calc(-50% - 74px)) translateY(20px);
+  background: rgba(20,18,14,.96);
+  border: .5px solid var(--border);
+  color: var(--gold);
+  font-size: 9px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  padding: 8px 18px;
+  border-radius: var(--radius);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .3s, transform .3s;
+  z-index: 30;
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+}
+#toast.show {
+  opacity: 1;
+  transform: translateX(calc(-50% - 74px)) translateY(0);
+}
+#toast.success { border-color: #6aaa7a; color: #6aaa7a; }
+#toast.error   { border-color: var(--danger); color: var(--danger); }
+
+/* =====================================================================
+   [UI] NÚT XOÁ TRANH khi hover (thêm mới)
+====================================================================== */
+.remove-btn {
+  position: absolute;
+  top: 2px; right: 2px;
+  width: 16px; height: 16px;
+  background: rgba(181,74,58,.85);
+  color: #fff;
+  font-size: 8px;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity .2s;
+  border-radius: 1px;
+}
+.uw > .item-wrap:hover .remove-btn { opacity: 1; }
+.item-wrap { position: relative; }
+
+/* =====================================================================
+   [UI] MINIMAP (thêm mới — góc dưới trái)
+====================================================================== */
+#minimap {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  width: 70px;
+  height: 70px;
+  background: rgba(15,13,10,.82);
+  border: .5px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  z-index: 10;
+  pointer-events: none;
+}
+#minimap canvas { width: 100%; height: 100%; }
+</style>
+</head>
+
+<body style="background:#0f0d0a;">
+<!-- =====================================================================
+  [UI] LAYOUT HTML
+  Bạn có thể chỉnh label, text, icon ở đây — an toàn để sửa
+====================================================================== -->
+<div id="wrap">
+
+  <!-- Canvas 3D — KHÔNG sửa id="c" -->
+  <canvas id="c"></canvas>
+
+  <!-- Header bar -->
+  <div id="header">
+    <span id="gallery-title">Gallery · 3D</span>
+    <span id="save-status">—</span>
+  </div>
+
+  <!-- Toolbar -->
+  <div id="ui">
+    <button class="btn active" id="btn-walk"  data-tip="W A S D để di chuyển">🚶 Walk</button>
+    <button class="btn"        id="btn-place" data-tip="Click tường / sàn để đặt">📌 Place</button>
+    <button class="btn danger" id="btn-reset" data-tip="Xoá tất cả, về mặc định">↺ Reset</button>
+    <button class="btn"        id="btn-save"  data-tip="Lưu vào database">💾 Save</button>
+    <button class="btn"        id="btn-cam"   data-tip="Reset vị trí camera">⌖ Cam</button>
+  </div>
+
+  <!-- Panel bên phải -->
+  <div id="panel">
+    <div class="ph">Tác phẩm</div>
+
+    <div class="sl">Tranh mẫu</div>
+    <div class="tg">
+      <canvas class="thumb sel" id="art0" width="60" height="45"></canvas>
+      <canvas class="thumb"     id="art1" width="60" height="45"></canvas>
+      <canvas class="thumb"     id="art2" width="60" height="45"></canvas>
+      <canvas class="thumb"     id="art3" width="60" height="45"></canvas>
+    </div>
+
+    <div class="sl">Upload ảnh / video</div>
+    <div class="uz" id="uz-img" onclick="document.getElementById('fi-img').click()">
+      + JPG · PNG · MP4
+    </div>
+    <input type="file" id="fi-img" accept="image/*,video/*" multiple style="display:none">
+    <div class="uw" id="uw-img"></div>
+
+    <div class="sl">Upload model 3D</div>
+    <div class="uz" id="uz-3d" onclick="document.getElementById('fi-3d').click()">
+      + GLB · GLTF · OBJ
+    </div>
+    <input type="file" id="fi-3d" accept=".glb,.gltf,.obj" multiple style="display:none">
+    <div class="uw" id="uw-3d"></div>
+
+    <div id="hint">
+      Chọn tác phẩm<br>
+      → bật Place<br>
+      → click sàn/tường<br>
+      <br>
+      Model 3D → sàn<br>
+      Tranh → tường
+    </div>
+  </div>
+
+  <!-- Loading overlay — KHÔNG sửa id -->
+  <div id="loading-overlay">
+    <div class="ld-txt" id="ld-txt">Đang tải...</div>
+    <div class="ld-bar"><div class="ld-fill" id="ld-fill"></div></div>
+  </div>
+
+  <!-- Info bar -->
+  <div id="info">W A S D · Kéo chuột để xoay</div>
+
+  <!-- Toast notification (thay thế alert) -->
+  <div id="toast"></div>
+
+  <!-- Minimap -->
+  <div id="minimap"><canvas id="minimap-canvas" width="70" height="70"></canvas></div>
+
+</div>
+
+<!-- =====================================================================
+  THREE.JS LIBRARIES — KHÔNG SỬA
+  Các thư viện cần thiết cho 3D scene
+====================================================================== -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+
+<script type="module">
+/* =====================================================================
+  ██████╗  █████╗ ████████╗ █████╗ ██████╗  █████╗ ███████╗███████╗
+  ██╔══██╗██╔══██╗╚══██╔══╝██╔══██╗██╔══██╗██╔══██╗██╔════╝██╔════╝
+  ██║  ██║███████║   ██║   ███████║██████╔╝███████║███████╗█████╗
+  ██║  ██║██╔══██║   ██║   ██╔══██║██╔══██╗██╔══██║╚════██║██╔══╝
+  ██████╔╝██║  ██║   ██║   ██║  ██║██████╔╝██║  ██║███████║███████╗
+  ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝
+
+  ⚠️  VÙNG DATABASE — KHÔNG CHỈNH SỬA NẾU KHÔNG CẦN THIẾT
+  Thay đổi sai ở đây sẽ khiến save/load/upload bị hỏng
+====================================================================== */
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+// ── Supabase credentials ───────────────────────────────────────────────
+// ⚠️ KHÔNG đổi những dòng này — kết nối tới database của bạn
+const SUPABASE_URL = "https://ejdzwaekpejmfajfnccl.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVqZHp3YWVrcGVqbWZhamZuY2NsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2MDgyNDYsImV4cCI6MjA5MzE4NDI0Nn0.69bZ3hQcCuhEPmy-Pi4Phou6OhCrbNIR7kuPR1yfr1I";
+const STORAGE_BUCKET = 'patbk';          // ⚠️ Tên bucket Storage trên Supabase
+const GALLERY_NAME   = 'gallery test';   // ⚠️ Khoá bản save trong bảng "gallery"
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* =====================================================================
+  KẾT THÚC VÙNG DATABASE
+====================================================================== */
+
+(function () {
+
+/* =====================================================================
+  [UI] HELPER: TOAST NOTIFICATION
+  Thay thế alert() — an toàn để sửa text, màu sắc
+====================================================================== */
+function toast(msg, type = 'info', duration = 2800) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + type;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = ''; }, duration);
+}
+
+/* =====================================================================
+  [3D] TRANH MẪU BUILTIN
+  Bạn có thể thêm/sửa các hàm vẽ ở đây để đổi tranh mẫu
+  — Không ảnh hưởng database
+====================================================================== */
+const artDefs = [
+  // Tranh 0 — Night spiral
+  (ctx, w, h) => {
+    ctx.fillStyle = '#0a1a3a'; ctx.fillRect(0,0,w,h);
+    for (let i = 0; i < 8; i++) {
+      const g = ctx.createRadialGradient(w/2,h/2,0,w/2,h/2,40);
+      g.addColorStop(0,'rgba(80,120,255,.6)'); g.addColorStop(1,'rgba(0,20,80,0)');
+      ctx.fillStyle = g; ctx.beginPath();
+      ctx.arc(w/2+Math.sin(i)*30, h/2+Math.cos(i)*20, 18-i*1.5, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255,220,100,.9)'; ctx.beginPath();
+    ctx.arc(w/2, h/2, 5, 0, Math.PI*2); ctx.fill();
+  },
+  // Tranh 1 — Abstract blocks
+  (ctx, w, h) => {
+    const cols = ['#c84b31','#e8a020','#2d6a4f','#f4a261','#264653'];
+    for (let i = 0; i < 24; i++) {
+      ctx.fillStyle = cols[i % cols.length];
+      ctx.fillRect(Math.random()*w, Math.random()*h, 15+Math.random()*35, 15+Math.random()*35);
+    }
+  },
+  // Tranh 2 — Line study
+  (ctx, w, h) => {
+    ctx.fillStyle = '#f0ede8'; ctx.fillRect(0,0,w,h);
+    ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1.5;
+    for (let i = 0; i < 6; i++) {
+      ctx.beginPath(); ctx.moveTo(10+i*18, 10);
+      ctx.bezierCurveTo(w-10, h*.3, 10, h*.7, w-10+i*5, h-10);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#c84b31'; ctx.beginPath();
+    ctx.arc(w*.6, h*.4, 12, 0, Math.PI*2); ctx.fill();
+  },
+  // Tranh 3 — Starfield
+  (ctx, w, h) => {
+    const g = ctx.createLinearGradient(0,0,w,h);
+    g.addColorStop(0,'#0d0d0d'); g.addColorStop(.5,'#1a0a2e'); g.addColorStop(1,'#0a1a3a');
+    ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+    for (let i = 0; i < 60; i++) {
+      ctx.fillStyle = `rgba(255,255,255,${Math.random()*.8+.2})`;
+      ctx.beginPath(); ctx.arc(Math.random()*w, Math.random()*h, Math.random()*2, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+];
+
+// Render thumbnail nhỏ cho panel
+artDefs.forEach((fn, i) => {
+  const c = document.getElementById('art' + i);
+  fn(c.getContext('2d'), 60, 45);
+});
+
+// Tạo canvas 512×384 để làm texture 3D
+function makeArtCanvas(i) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 384;
+  artDefs[i](c.getContext('2d'), 512, 384);
+  return c;
+}
+
+/* =====================================================================
+  [3D] KHỞI TẠO THREE.JS RENDERER & SCENE
+  ⚠️ KHÔNG sửa nếu không hiểu Three.js — sai ở đây sẽ vỡ canvas
+====================================================================== */
+const canvas   = document.getElementById('c');
+const PANEL_W  = 160;
+const PW       = canvas.parentElement.clientWidth - PANEL_W;
+const PH       = 600;
+canvas.style.width = PW + 'px';
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setSize(PW, PH);
+renderer.shadowMap.enabled = true;
+renderer.setClearColor(0x191613);
+
+const scene  = new THREE.Scene();
+scene.fog    = new THREE.FogExp2(0xffffff, 0.01);
+
+const camera = new THREE.PerspectiveCamera(70, PW/PH, .1, 100);
+camera.position.set(0, 1.7, 7);
+
+/* =====================================================================
+  [3D] ÁNH SÁNG
+  Bạn có thể chỉnh intensity, màu nếu muốn đổi không khí phòng tranh
+  — nhưng không đổi tên biến
+====================================================================== */
+scene.add(new THREE.AmbientLight(0xfff4e0, .7));
+scene.add(new THREE.HemisphereLight(0xffe8c0, 0x3a2e20, .7));
+
+function addSpot(x, z, i = 1.6) {
+  const l = new THREE.SpotLight(0xffe0a0, i, 18, Math.PI/5, .55, 1.3);
+  l.position.set(x, 4.85, z);
+  l.target.position.set(x, 0, z);
+  l.castShadow = true;
+  scene.add(l); scene.add(l.target);
+  const b = new THREE.Mesh(
+    new THREE.SphereGeometry(.05, 6, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffddaa })
+  );
+  b.position.set(x, 4.85, z);
+  scene.add(b);
+}
+[[-4,-5],[-1,-5],[2,-5],[-4,0],[-1,0],[2,0],[-4,5],[-1,5],[2,5]]
+  .forEach(([x,z]) => addSpot(x, z));
+
+/* =====================================================================
+  [3D] VẬT LIỆU & KẾT CẤU PHÒNG
+  Bạn có thể đổi màu sàn, tường, khung ở đây
+====================================================================== */
+const floorMat = new THREE.MeshLambertMaterial({ color: 0x6b5a47 });
+const wallMat  = new THREE.MeshLambertMaterial({ color: 0xd8d3ca });
+const ceilMat  = new THREE.MeshLambertMaterial({ color: 0xe8e4de });
+const frameMat = new THREE.MeshLambertMaterial({ color: 0x1a1006 });
+const skirtMat = new THREE.MeshLambertMaterial({ color: 0xc8c2b5 });
+
+// Sàn
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(20,20), floorMat);
+floor.rotation.x = -Math.PI/2; floor.receiveShadow = true;
+scene.add(floor);
+
+// Grid sàn
+const gridHelper = new THREE.GridHelper(20, 20, 0x5a4a38, 0x5a4a38);
+gridHelper.position.y = .001;
+scene.add(gridHelper);
+
+// Trần
+const ceil = new THREE.Mesh(new THREE.PlaneGeometry(20,20), ceilMat);
+ceil.rotation.x = Math.PI/2; ceil.position.y = 5;
+scene.add(ceil);
+
+// Bốn bức tường
+const wallMeshes = [];
+[
+  { w:20, h:5, p:[0,2.5,-8],  r:[0,0,0] },
+  { w:20, h:5, p:[0,2.5,8],   r:[0,Math.PI,0] },
+  { w:20, h:5, p:[-8,2.5,0],  r:[0,Math.PI/2,0] },
+  { w:20, h:5, p:[8,2.5,0],   r:[0,-Math.PI/2,0] }
+].forEach(({ w, h, p, r }) => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w,h), wallMat.clone());
+  m.position.set(...p); m.rotation.set(...r); m.receiveShadow = true;
+  scene.add(m); wallMeshes.push(m);
+});
+
+// Chân tường
+[-8,8].forEach(x => {
+  const s = new THREE.Mesh(new THREE.BoxGeometry(.07,.28,16), skirtMat);
+  s.position.set(x + (x>0?-.04:.04), .14, 0); scene.add(s);
+});
+[-8,8].forEach(z => {
+  const s = new THREE.Mesh(new THREE.BoxGeometry(16,.28,.07), skirtMat);
+  s.position.set(0, .14, z + (z>0?-.04:.04)); scene.add(s);
+});
+
+// Ray đèn trần
+[-3,3].forEach(x => {
+  const r = new THREE.Mesh(
+    new THREE.BoxGeometry(.05,.05,18),
+    new THREE.MeshLambertMaterial({ color: 0x888880 })
+  );
+  r.position.set(x, 4.88, 0); scene.add(r);
+});
+
+/* =====================================================================
+  [3D] PEDESTAL (bục trưng bày model 3D)
+  ⚠️ Không đổi tên hàm makePedestal — được gọi trong place3DModel
+====================================================================== */
+function makePedestal(pos) {
+  const g    = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.1,.08,1.1), new THREE.MeshLambertMaterial({ color: 0xddd8d0 }));
+  base.position.y = .04; g.add(base);
+  const col  = new THREE.Mesh(new THREE.BoxGeometry(.9,.8,.9),   new THREE.MeshLambertMaterial({ color: 0xf0ece6 }));
+  col.position.y = .44; g.add(col);
+  const top  = new THREE.Mesh(new THREE.BoxGeometry(1.05,.06,1.05), new THREE.MeshLambertMaterial({ color: 0xddd8d0 }));
+  top.position.y = .87; g.add(top);
+  g.position.copy(pos);
+  scene.add(g);
+  return g;
+}
+
+/* =====================================================================
+  [3D] MẢNG LƯU TRANH & MODEL ĐANG HIỂN THỊ
+  ⚠️ KHÔNG xoá / đổi tên artworks, models3d, selectedSource
+  — Các hàm save/load phụ thuộc vào đây
+====================================================================== */
+const artworks     = [];
+const models3d     = [];
+let selectedSource = { type: 'builtin', idx: 0 };
+
+/* =====================================================================
+  [3D] NHÂN VẬT NGƯỜI — đi theo camera (góc nhìn thứ 3)
+====================================================================== */
+function makePlayerCharacter() {
+  const g = new THREE.Group();
+  const skin  = new THREE.MeshLambertMaterial({ color: 0xf5c5a3 });
+  const hair  = new THREE.MeshLambertMaterial({ color: 0x2a1a0a });
+  const shirt = new THREE.MeshLambertMaterial({ color: 0x3a5fcd });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x2a2e38 });
+  const shoe  = new THREE.MeshLambertMaterial({ color: 0x1a1208 });
+
+  // Đầu
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), skin);
+  head.position.set(0, 1.72, 0);
+  g.add(head);
+
+  // Tóc
+  const hairTop = new THREE.Mesh(new THREE.SphereGeometry(0.135, 8, 6), hair);
+  hairTop.scale.y = 0.5;
+  hairTop.position.set(0, 1.79, 0);
+  g.add(hairTop);
+
+  // Thân
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.35, 0.15), shirt);
+  torso.position.set(0, 1.38, 0);
+  g.add(torso);
+
+  // Cánh tay trái
+  const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.32, 6), shirt);
+  armL.position.set(-0.19, 1.38, 0);
+  armL.rotation.z = 0.15;
+  g.add(armL);
+
+  // Cánh tay phải
+  const armR = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.32, 6), shirt);
+  armR.position.set(0.19, 1.38, 0);
+  armR.rotation.z = -0.15;
+  g.add(armR);
+
+  // Bàn tay trái
+  const handL = new THREE.Mesh(new THREE.SphereGeometry(0.05, 5, 5), skin);
+  handL.position.set(-0.22, 1.22, 0);
+  g.add(handL);
+
+  // Bàn tay phải
+  const handR = new THREE.Mesh(new THREE.SphereGeometry(0.05, 5, 5), skin);
+  handR.position.set(0.22, 1.22, 0);
+  g.add(handR);
+
+  // Chân trái (upper)
+  const legLU = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.28, 6), pants);
+  legLU.position.set(-0.08, 1.06, 0);
+  g.add(legLU);
+
+  // Chân phải (upper)
+  const legRU = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.28, 6), pants);
+  legRU.position.set(0.08, 1.06, 0);
+  g.add(legRU);
+
+  // Chân trái (lower)
+  const legLL = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.045, 0.28, 6), pants);
+  legLL.position.set(-0.08, 0.78, 0);
+  g.add(legLL);
+
+  // Chân phải (lower)
+  const legRL = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.045, 0.28, 6), pants);
+  legRL.position.set(0.08, 0.78, 0);
+  g.add(legRL);
+
+  // Giày trái
+  const shoeL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.17), shoe);
+  shoeL.position.set(-0.08, 0.635, 0.02);
+  g.add(shoeL);
+
+  // Giày phải
+  const shoeR = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.17), shoe);
+  shoeR.position.set(0.08, 0.635, 0.02);
+  g.add(shoeR);
+
+  // Cổ
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.08, 6), skin);
+  neck.position.set(0, 1.59, 0);
+  g.add(neck);
+
+  // Lưu tham chiếu để animate chân/tay
+  g.userData = {
+    legLU, legLL, legRU, legRL,
+    armL, armR,
+    shoeL, shoeR
+  };
+
+  scene.add(g);
+  return g;
+}
+
+const playerCharacter = makePlayerCharacter();
+let charWalkPhase = 0;
+
+/* =====================================================================
+  [3D] HÀM ĐẶT TRANH LÊN TƯỜNG
+  ⚠️ KHÔNG sửa tên hàm placeArtwork — được gọi bởi load và click handler
+====================================================================== */
+function placeArtwork(src, pos, rot) {
+  let tex;
+  if (src.canvas) tex = new THREE.CanvasTexture(src.canvas);
+  else            tex = src.texture;
+
+  const AW = 2.2, AH = 1.65;
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(AW+.16, AH+.16, .08), frameMat);
+  frame.position.copy(pos); frame.rotation.set(...rot);
+  scene.add(frame);
+
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(AW, AH),
+    new THREE.MeshLambertMaterial({ map: tex })
+  );
+  const n = new THREE.Vector3(Math.sin(rot[1]), 0, Math.cos(rot[1]));
+  plane.position.copy(pos).addScaledVector(n, .046);
+  plane.rotation.set(...rot);
+  scene.add(plane);
+
+  const sl = new THREE.SpotLight(0xfff2d0, 2.2, 10, Math.PI / 7, 0.6, 1);
+
+scene.add(sl);
+scene.add(sl.target);
+  scene.add(sl); scene.add(sl.target);
+
+  artworks.push({
+    frame, plane, light: sl, tgt: sl.target,
+    isVideo: src.isVideo,
+    tex:     src.isVideo ? tex : null,
+    builtinIdx: src.builtinIdx !== undefined ? src.builtinIdx : null,
+    storageUrl: src.storageUrl || null
+  });
+}
+
+/* =====================================================================
+  [3D] HÀM ĐẶT MODEL 3D LÊN SÀN
+  ⚠️ KHÔNG sửa tên hàm place3DModel — được gọi bởi click handler
+====================================================================== */
+function place3DModel(object, pos) {
+  // Auto-scale về ~1m
+  const box   = new THREE.Box3().setFromObject(object);
+  const size  = box.getSize(new THREE.Vector3());
+  const maxDim= Math.max(size.x, size.y, size.z);
+  object.scale.setScalar(1.2 / maxDim);
+  object.position.copy(pos);
+  object.position.y = .88; // đỉnh pedestal
+  scene.add(object);
+
+  const pl = new THREE.PointLight(0xfff0dd, 1.5, 4);
+  pl.position.set(pos.x, pos.y+2, pos.z);
+  scene.add(pl);
+
+  const ped = makePedestal(new THREE.Vector3(pos.x, 0, pos.z));
+  models3d.push({ object, light: pl, pedestal: ped });
+}
+
+/* =====================================================================
+  [3D] TRANH MẶC ĐỊNH KHI MỞ TRANG (trước khi load từ database)
+  Bạn có thể thay vị trí / index tranh ở đây
+====================================================================== */
+const DEFAULT_ARTWORKS = [
+  { i:0, p:[-3,2.2,-7.85], r:[0,0,0] },
+  { i:1, p:[3, 2.2,-7.85], r:[0,0,0] },
+  { i:2, p:[-7.85,2.2,-2], r:[0,Math.PI/2,0] },
+  { i:3, p:[-7.85,2.2,2],  r:[0,Math.PI/2,0] }
+];
+DEFAULT_ARTWORKS.forEach(a =>
+  placeArtwork({ canvas: makeArtCanvas(a.i), builtinIdx: a.i }, new THREE.Vector3(...a.p), a.r)
+);
+
+/* =====================================================================
+  [UI] CHỌN TÁC PHẨM — chức năng select thumbnail trong panel
+====================================================================== */
+function selectSource(src) {
+  selectedSource = src;
+  document.querySelectorAll('.thumb,.uth,.model-thumb').forEach(e => e.classList.remove('sel'));
+}
+
+document.querySelectorAll('.thumb').forEach((el, i) => {
+  el.addEventListener('click', () => { selectSource({ type:'builtin', idx:i }); el.classList.add('sel'); });
+});
+document.getElementById('art0').classList.add('sel');
+
+/* =====================================================================
+  [DATABASE/STORAGE] HÀM UPLOAD FILE LÊN SUPABASE STORAGE
+  ⚠️ KHÔNG SỬA PHẦN NÀY — logic lưu file lên cloud
+====================================================================== */
+async function uploadToStorage(file) {
+  const ext  = file.name.split('.').pop();
+  const path = `uploads/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, { upsert: true });
+  if (error) throw error;
+  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+  return { url: data.publicUrl, path };
+}
+
+/* =====================================================================
+  [DATABASE/STORAGE] HÀM LOAD ẢNH TỪ URL VÀO PANEL
+  ⚠️ KHÔNG SỬA — được gọi khi load bản save từ database
+====================================================================== */
+function addImageFromUrl(url, fileName, wrap) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const cv = document.createElement('canvas');
+      cv.width = 512; cv.height = 384;
+      cv.getContext('2d').drawImage(img, 0, 0, 512, 384);
+      const tex = new THREE.CanvasTexture(cv);
+      const src = { type:'user', isVideo:false, canvas:cv, texture:tex, storageUrl:url };
+
+      // Thumbnail trong panel
+      const wrap_item = document.createElement('div');
+      wrap_item.className = 'item-wrap';
+      const th = document.createElement('canvas');
+      th.width = 120; th.height = 90; th.className = 'uth';
+      th.getContext('2d').drawImage(img, 0, 0, 120, 90);
+      th.addEventListener('click', () => { selectSource(src); th.classList.add('sel'); });
+      const lbl = document.createElement('div');
+      lbl.className = 'utl';
+      lbl.textContent = (fileName || '').substring(0, 20);
+      wrap_item.appendChild(th);
+      wrap_item.appendChild(lbl);
+      wrap.appendChild(wrap_item);
+
+      selectSource(src); th.classList.add('sel');
+      resolve(src);
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+/* =====================================================================
+  [UI/UPLOAD] XỬ LÝ UPLOAD ẢNH / VIDEO TỪ MÁY TÍNH
+  Phần UI (toast, thumbnail) → có thể sửa text
+  Phần uploadToStorage / placeArtwork → ⚠️ KHÔNG sửa
+====================================================================== */
+document.getElementById('fi-img').addEventListener('change', async function (e) {
+  const wrap = document.getElementById('uw-img');
+  for (const file of Array.from(e.target.files)) {
+    const isVideo = file.type.startsWith('video/');
+    const lo = document.getElementById('loading-overlay');
+    const lt = document.getElementById('ld-txt');
+
+    if (isVideo) {
+      try {
+        lo.classList.add('show');
+        lt.textContent = 'Đang upload ' + file.name + '...';
+        const { url } = await uploadToStorage(file);   // ⚠️ KHÔNG sửa
+        lo.classList.remove('show');
+
+        const vid = document.createElement('video');
+        vid.src = url; vid.loop = true; vid.muted = true;
+        vid.playsInline = true; vid.crossOrigin = 'anonymous';
+        vid.addEventListener('loadeddata', () => {
+          const tex = new THREE.VideoTexture(vid);
+          tex.minFilter = THREE.LinearFilter;
+          const src = { type:'user', isVideo:true, texture:tex, videoEl:vid, storageUrl:url };
+
+          const wrap_item = document.createElement('div');
+          wrap_item.className = 'item-wrap';
+          const th = document.createElement('canvas');
+          th.width = 120; th.height = 90; th.className = 'uth';
+          setTimeout(() => {
+            vid.currentTime = .5;
+            vid.addEventListener('seeked', () => {
+              th.getContext('2d').drawImage(vid, 0, 0, 120, 90);
+            }, { once: true });
+          }, 200);
+          th.addEventListener('click', () => { selectSource(src); th.classList.add('sel'); });
+          const lbl = document.createElement('div');
+          lbl.className = 'utl';
+          lbl.textContent = '▶ ' + file.name.substring(0, 20);
+          wrap_item.appendChild(th);
+          wrap_item.appendChild(lbl);
+          wrap.appendChild(wrap_item);
+
+          selectSource(src); th.classList.add('sel');
+          vid.play();
+        });
+      } catch (err) {
+        document.getElementById('loading-overlay').classList.remove('show');
+        toast('Upload lỗi: ' + err.message, 'error');   // ← UI: đổi text nếu muốn
+      }
+
+    } else {
+      try {
+        lo.classList.add('show');
+        lt.textContent = 'Đang upload ' + file.name + '...';
+        const { url } = await uploadToStorage(file);   // ⚠️ KHÔNG sửa
+        lo.classList.remove('show');
+        await addImageFromUrl(url, file.name, wrap);   // ⚠️ KHÔNG sửa
+      } catch (err) {
+        document.getElementById('loading-overlay').classList.remove('show');
+        toast('Upload lỗi: ' + err.message, 'error');
+      }
+    }
+  }
+  this.value = '';
+});
+
+/* =====================================================================
+  [UI/UPLOAD] XỬ LÝ UPLOAD MODEL 3D (.glb / .gltf / .obj)
+  ⚠️ Phần loader KHÔNG sửa — chỉ có thể sửa toast text
+====================================================================== */
+const gltfLoader = new THREE.GLTFLoader();
+const objLoader  = new THREE.OBJLoader();
+
+document.getElementById('fi-3d').addEventListener('change', function (e) {
+  Array.from(e.target.files).forEach(file => {
+    const ext = file.name.split('.').pop().toLowerCase();
+    const url = URL.createObjectURL(file);
+    const lo  = document.getElementById('loading-overlay');
+    const lf  = document.getElementById('ld-fill');
+    const lt  = document.getElementById('ld-txt');
+    lo.classList.add('show');
+    lt.textContent = 'Đang tải ' + file.name + '...';
+    lf.style.width = '0%';
+
+    const onLoad = (object) => {
+      lo.classList.remove('show');
+      const src = { type:'model3d', object, name: file.name };
+      const th  = document.createElement('div');
+      th.className = 'model-thumb'; th.textContent = '📦'; th.title = file.name;
+      th.addEventListener('click', () => { selectSource(src); th.classList.add('sel'); });
+      const lbl = document.createElement('div');
+      lbl.className = 'utl';
+      lbl.textContent = file.name.substring(0, 20);
+      document.getElementById('uw-3d').appendChild(th);
+      document.getElementById('uw-3d').appendChild(lbl);
+      selectSource(src); th.classList.add('sel');
+      toast('Đã tải model: ' + file.name.substring(0,18), 'success');
+    };
+    const onProgress = (xhr) => {
+      if (xhr.lengthComputable)
+        lf.style.width = Math.round(xhr.loaded / xhr.total * 100) + '%';
+    };
+    const onError = (err) => {
+      lo.classList.remove('show');
+      console.error(err);
+      toast('Không tải được model: ' + file.name, 'error');
+    };
+
+    if (ext === 'glb' || ext === 'gltf') {
+      gltfLoader.load(url, (gltf) => onLoad(gltf.scene), onProgress, onError);
+    } else if (ext === 'obj') {
+      objLoader.load(url, (obj) => {
+        obj.traverse(c => {
+          if (c.isMesh) c.material = new THREE.MeshLambertMaterial({ color: 0xccbbaa });
+        });
+        onLoad(obj);
+      }, onProgress, onError);
+    }
+  });
+  this.value = '';
+});
+
+/* =====================================================================
+  [UI] CHẾ ĐỘ DI CHUYỂN vs ĐẶT TÁC PHẨM
+  Bạn có thể đổi text info bar ở đây
+====================================================================== */
+let mode = 'walk';
+
+const floorPlane = new THREE.Mesh(
+  new THREE.PlaneGeometry(16,16),
+  new THREE.MeshBasicMaterial({ visible: false })
+);
+floorPlane.rotation.x = -Math.PI/2; floorPlane.position.y = 0;
+scene.add(floorPlane);
+
+function updateMode(m) {
+  mode = m;
+  canvas.className = m === 'walk' ? 'walk-mode' : '';
+  document.getElementById('btn-walk').classList.toggle('active', m === 'walk');
+  document.getElementById('btn-place').classList.toggle('active', m === 'place');
+  document.getElementById('info').textContent =
+    m === 'walk'
+      ? 'W A S D · Kéo chuột để xoay'
+      : selectedSource.type === 'model3d'
+        ? 'Click sàn để đặt model'
+        : 'Click tường để treo tranh';
+}
+
+document.getElementById('btn-walk').addEventListener('click', () => updateMode('walk'));
+document.getElementById('btn-place').addEventListener('click', () => updateMode('place'));
+
+// Reset về mặc định
+document.getElementById('btn-reset').addEventListener('click', () => {
+  artworks.forEach(a => {
+    scene.remove(a.frame); scene.remove(a.plane);
+    scene.remove(a.light); scene.remove(a.tgt);
+  });
+  artworks.length = 0;
+  models3d.forEach(m => {
+    scene.remove(m.object); scene.remove(m.light); scene.remove(m.pedestal);
+  });
+  models3d.length = 0;
+  DEFAULT_ARTWORKS.forEach(a =>
+    placeArtwork({ canvas:makeArtCanvas(a.i), builtinIdx:a.i }, new THREE.Vector3(...a.p), a.r)
+  );
+  toast('Đã reset gallery', 'info');
+});
+
+// Reset camera về vị trí ban đầu (nút mới)
+document.getElementById('btn-cam').addEventListener('click', () => {
+  camera.position.set(0, 1.7, 7);
+  yaw = 0; pitch = 0;
+  toast('Camera reset', 'info');
+});
+
+/* =====================================================================
+  [UI] RAYCAST — XỬ LÝ CLICK ĐẶT TÁC PHẨM / MODEL
+  ⚠️ KHÔNG sửa logic raycaster — sai sẽ vỡ chức năng đặt tranh
+====================================================================== */
+const raycaster = new THREE.Raycaster();
+const mouse     = new THREE.Vector2();
+
+canvas.addEventListener('click', e => {
+  if (mode !== 'place') return;
+  const rect = canvas.getBoundingClientRect();
+  mouse.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+  mouse.y = -((e.clientY - rect.top)  / rect.height)  * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+
+  if (selectedSource.type === 'model3d') {
+    const hits = raycaster.intersectObject(floorPlane);
+    if (!hits.length) return;
+    const pt = hits[0].point.clone();
+    pt.x = Math.max(-6.5, Math.min(6.5, pt.x));
+    pt.z = Math.max(-6.5, Math.min(6.5, pt.z));
+    const clone = selectedSource.object.clone();
+    place3DModel(clone, pt);
+    toast('Model đặt thành công', 'success');
+  } else {
+    const hits = raycaster.intersectObjects(wallMeshes);
+    if (!hits.length) return;
+    const hit = hits[0];
+    const pt  = hit.point.clone();
+    pt.y = Math.max(1.1, Math.min(3.6, pt.y));
+    const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+    pt.add(n.clone().multiplyScalar(.05));
+    const rot = [0, Math.atan2(n.x, n.z), 0];
+
+    if (selectedSource.type === 'builtin') {
+      placeArtwork({ canvas:makeArtCanvas(selectedSource.idx), builtinIdx:selectedSource.idx }, pt, rot);
+    } else if (selectedSource.isVideo) {
+      selectedSource.videoEl.play();
+      placeArtwork({ isVideo:true, texture:selectedSource.texture, storageUrl:selectedSource.storageUrl }, pt, rot);
+    } else {
+      placeArtwork({ canvas:selectedSource.canvas, texture:selectedSource.texture, storageUrl:selectedSource.storageUrl }, pt, rot);
+    }
+    toast('Tranh đã đặt lên tường', 'success');
+  }
+});
+
+/* =====================================================================
+  [3D] FPS CAMERA — DI CHUYỂN & XOAY
+  ⚠️ KHÔNG sửa — logic điều khiển camera W/A/S/D + drag
+====================================================================== */
+const keys = {};
+document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+document.addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
+
+let yaw = 0, pitch = 0, drag = false, lx = 0, ly = 0;
+
+canvas.addEventListener('mousedown', e => {
+  if (mode === 'walk') { drag = true; lx = e.clientX; ly = e.clientY; }
+});
+window.addEventListener('mouseup', () => drag = false);
+window.addEventListener('mousemove', e => {
+  if (!drag) return;
+  yaw   -= (e.clientX - lx) * .004;
+  pitch -= (e.clientY - ly) * .003;
+  pitch  = Math.max(-1.05, Math.min(1.05, pitch));
+  lx = e.clientX; ly = e.clientY;
+});
+
+const dir = new THREE.Vector3();
+
+/* =====================================================================
+  [3D] MINIMAP — hiển thị vị trí camera trên bản đồ thu nhỏ
+====================================================================== */
+const mmCanvas = document.getElementById('minimap-canvas');
+const mmCtx    = mmCanvas.getContext('2d');
+
+function drawMinimap() {
+  const S = 70, half = S/2;
+  mmCtx.clearRect(0,0,S,S);
+  // Nền
+  mmCtx.fillStyle = 'rgba(15,13,10,.8)';
+  mmCtx.fillRect(0,0,S,S);
+  // Phòng (20×20 → 60×60 trong 70px, margin 5px)
+  const scale = 60/20;
+  mmCtx.strokeStyle = 'rgba(212,197,169,.25)';
+  mmCtx.lineWidth = .5;
+  mmCtx.strokeRect(5,5,60,60);
+  // Tranh (dots)
+  artworks.forEach(a => {
+    const mx = (a.frame.position.x + 10) * scale + 5;
+    const my = (a.frame.position.z + 10) * scale + 5;
+    mmCtx.fillStyle = 'rgba(212,197,169,.55)';
+    mmCtx.fillRect(mx-1.5, my-1.5, 3, 3);
+  });
+  // Camera
+  const cx = (camera.position.x + 10) * scale + 5;
+  const cy = (camera.position.z + 10) * scale + 5;
+  mmCtx.save();
+  mmCtx.translate(cx, cy);
+  mmCtx.rotate(-yaw);
+  mmCtx.fillStyle = '#c8a96e';
+  mmCtx.beginPath();
+  mmCtx.moveTo(0,-5); mmCtx.lineTo(3,3); mmCtx.lineTo(-3,3);
+  mmCtx.closePath(); mmCtx.fill();
+  mmCtx.restore();
+}
+
+/* =====================================================================
+  [3D] ANIMATION LOOP
+  ⚠️ KHÔNG sửa — vòng lặp render chính
+====================================================================== */
+function animate() {
+  requestAnimationFrame(animate);
+
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = yaw;
+  camera.rotation.x = pitch;
+
+  dir.set(0,0,0);
+  if (keys['w'] || keys['arrowup'])    dir.z -= 1;
+  if (keys['s'] || keys['arrowdown'])  dir.z += 1;
+  if (keys['a'] || keys['arrowleft'])  dir.x -= 1;
+  if (keys['d'] || keys['arrowright']) dir.x += 1;
+
+  const isMoving = dir.length() > 0;
+
+  if (isMoving) {
+    dir.normalize().applyEuler(new THREE.Euler(0, yaw, 0));
+    camera.position.addScaledVector(dir, .07);
+    camera.position.x = Math.max(-7.5, Math.min(7.5, camera.position.x));
+    camera.position.z = Math.max(-7.5, Math.min(7.5, camera.position.z));
+    camera.position.y = 1.7;
+  }
+
+  // === NHÂN VẬT NGƯỜI — đi theo camera ===
+  {
+    // Tính hướng di chuyển trong world space (trước khi normalize)
+    const rawDir = new THREE.Vector3();
+    if (keys['w'] || keys['arrowup'])    rawDir.z -= 1;
+    if (keys['s'] || keys['arrowdown'])  rawDir.z += 1;
+    if (keys['a'] || keys['arrowleft'])  rawDir.x -= 1;
+    if (keys['d'] || keys['arrowright']) rawDir.x += 1;
+
+    let charFacing = yaw; // mặc định nhìn cùng hướng camera
+    if (rawDir.length() > 0) {
+      // Góc di chuyển trong world space
+      const moveAngle = Math.atan2(rawDir.x, rawDir.z);
+      charFacing = yaw + moveAngle;
+    }
+
+    // Smooth rotate nhân vật
+    let delta = charFacing - playerCharacter.rotation.y;
+    // Wrap về [-PI, PI]
+    while (delta >  Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    playerCharacter.rotation.y += delta * 0.2;
+
+    // Đặt nhân vật phía TRƯỚC camera — nhìn thấy lưng (hoặc mặt khi lùi)
+    const offset = new THREE.Vector3(0, 0, -1.1);
+    offset.applyEuler(new THREE.Euler(0, yaw, 0));
+    playerCharacter.position.x = camera.position.x + offset.x;
+    playerCharacter.position.z = camera.position.z + offset.z;
+    playerCharacter.position.y = 0;
+
+    // Animate chân / tay khi đi
+    if (isMoving) {
+      charWalkPhase += 0.18;
+    } else {
+      // Về tư thế đứng yên
+      charWalkPhase *= 0.85;
+    }
+    const sw = Math.sin(charWalkPhase);
+    const ud = playerCharacter.userData;
+    ud.legLU.rotation.x =  sw * 0.45;
+    ud.legLL.rotation.x = -Math.max(0, sw) * 0.4;
+    ud.legRU.rotation.x = -sw * 0.45;
+    ud.legRL.rotation.x =  Math.max(0, -sw) * 0.4;
+    ud.armL.rotation.x  = -sw * 0.4;
+    ud.armR.rotation.x  =  sw * 0.4;
+    ud.shoeL.position.z = 0.02 + Math.max(0, sw) * 0.03;
+    ud.shoeR.position.z = 0.02 + Math.max(0, -sw) * 0.03;
+  }
+
+  // Cập nhật video texture
+  artworks.forEach(a => { if (a.isVideo && a.tex) a.tex.needsUpdate = true; });
+  // Xoay model 3D chậm
+  models3d.forEach(m => { m.object.rotation.y += .005; });
+
+  drawMinimap();
+  renderer.render(scene, camera);
+}
+animate();
+
+/* =====================================================================
+  ██████╗  █████╗ ████████╗ █████╗ ██████╗  █████╗ ███████╗███████╗
+  VÙNG DATABASE — SAVE / LOAD
+  ⚠️ KHÔNG SỬA NẾU KHÔNG HIỂU SUPABASE — sai ở đây sẽ mất dữ liệu
+====================================================================== */
+
+// ── SAVE ──────────────────────────────────────────────────────────────
+async function saveGallery() {
+  const statusEl = document.getElementById('save-status');
+  statusEl.textContent = 'Saving…'; statusEl.className = 'saving';
+
+  const galleryData = {
+    artworks: artworks.map(a => ({
+      x: a.frame.position.x,
+      y: a.frame.position.y,
+      z: a.frame.position.z,
+      ry: a.frame.rotation.y,
+      builtinIdx: a.builtinIdx !== undefined ? a.builtinIdx : null,
+      storageUrl: a.storageUrl || null,
+      isVideo:    a.isVideo || false
+    })),
+    models: models3d.map(m => ({
+      x: m.object.position.x,
+      y: m.object.position.y,
+      z: m.object.position.z
+    }))
+  };
+
+  try {
+    await supabase.from("gallery").delete().eq("name", GALLERY_NAME);
+    const { error } = await supabase
+      .from("gallery")
+      .insert([{ name: GALLERY_NAME, scene_data: galleryData }]);
+
+    if (error) {
+      console.error("Supabase error:", error);
+      statusEl.textContent = 'Lỗi'; statusEl.className = 'error';
+      toast('Lưu lỗi: ' + error.message, 'error');
+    } else {
+      statusEl.textContent = 'Saved ✓'; statusEl.className = 'saved';
+      toast('Đã lưu vào database ✓', 'success');
+      setTimeout(() => { statusEl.textContent = '—'; statusEl.className = ''; }, 4000);
+    }
+  } catch (e) {
+    console.error("Lỗi không xác định:", e);
+    statusEl.textContent = 'Lỗi'; statusEl.className = 'error';
+    toast('Lỗi: ' + e.message, 'error');
+  }
+}
+
+// ── LOAD ──────────────────────────────────────────────────────────────
+async function loadGallery() {
+  try {
+    const { data, error } = await supabase
+      .from("gallery")
+      .select("*")
+      .eq("name", GALLERY_NAME)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (error)                          { console.error("Load error:", error); return; }
+    if (!data || data.length === 0)     { console.log("Không có dữ liệu save"); return; }
+
+    const scene_data = data[0].scene_data;
+
+    // Xoá tranh mặc định đang hiển thị
+    artworks.forEach(a => {
+      scene.remove(a.frame); scene.remove(a.plane);
+      scene.remove(a.light); scene.remove(a.tgt);
+    });
+    artworks.length = 0;
+
+    if (!scene_data.artworks || scene_data.artworks.length === 0) return;
+
+    const wrap = document.getElementById('uw-img');
+
+    for (const a of scene_data.artworks) {
+      const pos = new THREE.Vector3(a.x, a.y, a.z);
+      const rot = [0, a.ry || 0, 0];
+
+      if (a.storageUrl) {
+        if (a.isVideo) {
+          const vid = document.createElement('video');
+          vid.src = a.storageUrl; vid.loop = true; vid.muted = true;
+          vid.playsInline = true; vid.crossOrigin = 'anonymous';
+          vid.addEventListener('loadeddata', () => {
+            const tex = new THREE.VideoTexture(vid);
+            tex.minFilter = THREE.LinearFilter;
+            placeArtwork({ type:'user', isVideo:true, texture:tex, videoEl:vid, storageUrl:a.storageUrl }, pos, rot);
+            vid.play();
+          });
+        } else {
+          const src = await addImageFromUrl(a.storageUrl, a.storageUrl.split('/').pop(), wrap);
+          if (src) placeArtwork({ ...src, storageUrl:a.storageUrl }, pos, rot);
+        }
+      } else {
+        const idx = Math.min(3, Math.max(0, parseInt(a.builtinIdx) || 0));
+        placeArtwork({ canvas:makeArtCanvas(idx), builtinIdx:idx }, pos, rot);
+      }
+    }
+
+    toast('Gallery đã được khôi phục ✓', 'success');
+
+  } catch (e) {
+    console.error("Load lỗi:", e);
+  }
+}
+
+/* =====================================================================
+  KẾT THÚC VÙNG DATABASE
+====================================================================== */
+
+// Gắn nút Save
+document.getElementById('btn-save').addEventListener('click', saveGallery);
+
+// Tự động load khi mở trang (giữ nguyên sau F5)
+loadGallery();
+
+})();
+</script>
+</body>
+</html>
