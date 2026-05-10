@@ -949,7 +949,6 @@ body { background:#1a1714; overflow:hidden; font-family:var(--font-ui); }
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
 
 <!-- Expose GLTFLoader ra window de dung trong type="module" -->
 <script>
@@ -2278,8 +2277,6 @@ charLoader.load(
       if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; }
     });
     scene.add(playerCharacter);
-    // Giữ fallbackChar visible = false chỉ khi GLB load thành công
-    // nhưng vị trí broadcast dùng camera.position nên không bị ảnh hưởng
     fallbackChar.visible = false;
 
     // Tao AnimationMixer
@@ -2295,22 +2292,6 @@ charLoader.load(
     if (actionIdle) { actionIdle.play(); currentAction = actionIdle; }
 
     charReady = true;
-
-  // Lưu source để multiplayer clone
-  _glbSource = gltf;
-
-  // Nếu có player đang dùng fallback, upgrade lên GLB
-  otherPlayers.forEach((p, id) => {
-    if (p.group.userData && p.group.userData.isFallback) {
-      // Xóa fallback, tạo lại bằng GLB
-      scene.remove(p.group);
-      const meshData = createOtherPlayerFromGLB(id);
-      const pos = { x: p.targetX, z: p.targetZ, ry: p.targetRY };
-      meshData.group.position.set(pos.x, meshData.group.position.y, pos.z);
-      meshData.group.rotation.y = pos.ry;
-      Object.assign(p, meshData);
-    }
-  });
   },
   null,
   (err) => { console.warn('character.glb load failed, using fallback:', err); }
@@ -2320,44 +2301,49 @@ charLoader.load(
 function updateCharacter(isMoving) {
   const delta = charClock.getDelta();
 
-  // Huong nhan vat: chi cap nhat khi bam phim
+  // Tinh huong di chuyen
   const rawDir = new THREE.Vector3();
   if (keys['w']||keys['arrowup'])    rawDir.z -= 1;
   if (keys['s']||keys['arrowdown'])  rawDir.z += 1;
   if (keys['a']||keys['arrowleft'])  rawDir.x -= 1;
   if (keys['d']||keys['arrowright']) rawDir.x += 1;
+
+  // Chi cap nhat huong khi bam phim, dung thi giu nguyen
   if (rawDir.length() > 0) {
     prevCharFacing = yaw + Math.atan2(rawDir.x, rawDir.z);
   }
   const charFacing = prevCharFacing;
 
-  // Vi tri nhan vat = vi tri camera, offset phia truoc theo lastMoveYaw (khong doi khi xoay chuot)
-  const CHAR_FRONT = 0.35; // khoang cach nhan vat truoc camera
-  const px = camera.position.x + Math.sin(prevCharFacing) * CHAR_FRONT;
-  const pz = camera.position.z + Math.cos(prevCharFacing) * CHAR_FRONT;
+  // Vi tri nhan vat: luon o phia truoc camera theo yaw (khong theo pitch)
+  const offset = new THREE.Vector3(0, 0, -2.0);
+  offset.applyEuler(new THREE.Euler(0, yaw, 0));
 
   if (charReady && playerCharacter) {
+    // Smooth rotate
     let rot_delta = charFacing - playerCharacter.rotation.y;
     while (rot_delta >  Math.PI) rot_delta -= Math.PI * 2;
     while (rot_delta < -Math.PI) rot_delta += Math.PI * 2;
     playerCharacter.rotation.y += rot_delta * 0.2;
 
-    playerCharacter.position.x = px;
-    playerCharacter.position.z = pz;
+    playerCharacter.position.x = Math.max(-6.5, Math.min(6.5, camera.position.x + offset.x));
+    playerCharacter.position.z = Math.max(-6.5, Math.min(6.5, camera.position.z + offset.z));
     playerCharacter.position.y = window.__charGroundOffset || 0;
 
+    // Switch animation
     if (isMoving) switchAction(actionWalk || actionIdle);
     else          switchAction(actionIdle);
+
     if (charMixer) charMixer.update(delta);
 
   } else {
+    // Fallback geometry
     let fb_delta = charFacing - fallbackChar.rotation.y;
     while (fb_delta >  Math.PI) fb_delta -= Math.PI * 2;
     while (fb_delta < -Math.PI) fb_delta += Math.PI * 2;
     fallbackChar.rotation.y += fb_delta * 0.2;
 
-    fallbackChar.position.x = px;
-    fallbackChar.position.z = pz;
+    fallbackChar.position.x = Math.max(-6.5, Math.min(6.5, camera.position.x + offset.x));
+    fallbackChar.position.z = Math.max(-6.5, Math.min(6.5, camera.position.z + offset.z));
     fallbackChar.position.y = 0;
 
     if (isMoving) charWalkPhase += 0.18;
@@ -2481,313 +2467,6 @@ if (!localStorage.getItem('gallery_visited')) {
     localStorage.setItem('gallery_visited','1');
   }, 800);
 }
-
-/* ═══════════════════════════════════════
-   MULTIPLAYER — Realtime Presence
-   Dùng Supabase Broadcast (no DB table needed)
-   Mỗi khách thấy nhau di chuyển + bảng tên
-   Dùng character.glb clone cho tất cả mọi người
-═══════════════════════════════════════ */
-const MY_ID = Math.random().toString(36).slice(2, 10);
-
-// Map: playerId → { group, mixer, actionIdle, actionWalk, currentAction, labelDiv, lastSeen, targetX, targetZ, targetRY, moving }
-const otherPlayers = new Map();
-
-// Cache GLB gốc để clone (set khi charLoader load xong)
-// charGltfSource được set sau khi charLoader.load thành công
-let _glbSource = null; // { scene, animations }
-
-// Hàng chờ: nếu GLB chưa load xong thì buffer lại payload
-const _pendingSpawn = [];
-
-// Tạo nhân vật GLB clone cho người khác
-function createOtherPlayerFromGLB(id) {
-  if (!_glbSource) return null;
-
-  // Dùng SkeletonUtils.clone để clone đúng SkinnedMesh + skeleton
-  const cloned = THREE.SkeletonUtils
-    ? THREE.SkeletonUtils.clone(_glbSource.scene)
-    : _glbSource.scene.clone(true);
-
-  cloned.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
-
-  // Dùng groundOffset từ player chính (đã tính sẵn)
-  const gOffset = window.__charGroundOffset || 0;
-  cloned.position.y = gOffset;
-
-  const group = new THREE.Group();
-  group.add(cloned);
-  scene.add(group);
-
-  // AnimationMixer riêng cho clone này
-  const mixer = new THREE.AnimationMixer(cloned);
-  const clips = _glbSource.animations;
-  const findClip = (name) => clips.find(c => c.name.toLowerCase() === name) || null;
-  const idleClip = findClip('idle');
-  const walkClip = findClip('walk');
-  let aIdle = null, aWalk = null, aCurrent = null;
-  if (idleClip) { aIdle = mixer.clipAction(idleClip); aIdle.play(); aCurrent = aIdle; }
-  if (walkClip) { aWalk = mixer.clipAction(walkClip); }
-
-  return { group, mixer, actionIdle: aIdle, actionWalk: aWalk, currentAction: aCurrent };
-}
-
-function switchOtherAction(p, next) {
-  if (!next || next === p.currentAction) return;
-  if (p.currentAction) p.currentAction.fadeOut(0.25);
-  next.reset().fadeIn(0.25).play();
-  p.currentAction = next;
-}
-
-// Fallback: tạo fallback geometry nếu GLB chưa load
-function createOtherPlayerFallback() {
-  const skin  = new THREE.MeshLambertMaterial({ color: 0xf5c5a3 });
-  const shirt = new THREE.MeshLambertMaterial({ color: 0x3a5fcd });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x2a2e38 });
-  const shoe  = new THREE.MeshLambertMaterial({ color: 0x1a1208 });
-  const g = new THREE.Group();
-  const head  = new THREE.Mesh(new THREE.SphereGeometry(0.13,8,8), skin);
-  head.position.set(0,1.72,0); g.add(head);
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.28,0.35,0.15), shirt);
-  torso.position.set(0,1.38,0); g.add(torso);
-  const armL  = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.04,0.32,6), shirt);
-  armL.position.set(-0.19,1.38,0); armL.rotation.z= 0.15; g.add(armL);
-  const armR  = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.04,0.32,6), shirt);
-  armR.position.set( 0.19,1.38,0); armR.rotation.z=-0.15; g.add(armR);
-  const legLU = new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.06,0.28,6), pants);
-  legLU.position.set(-0.08,1.06,0); g.add(legLU);
-  const legRU = new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.06,0.28,6), pants);
-  legRU.position.set( 0.08,1.06,0); g.add(legRU);
-  const legLL = new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.045,0.28,6), pants);
-  legLL.position.set(-0.08,0.78,0); g.add(legLL);
-  const legRL = new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.045,0.28,6), pants);
-  legRL.position.set( 0.08,0.78,0); g.add(legRL);
-  const shoeL = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.07,0.17), shoe);
-  shoeL.position.set(-0.08,0.635,0.02); g.add(shoeL);
-  const shoeR = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.07,0.17), shoe);
-  shoeR.position.set( 0.08,0.635,0.02); g.add(shoeR);
-  g.userData = { legLU, legLL, legRU, legRL, armL, armR, shoeL, shoeR, isFallback: true };
-  scene.add(g);
-  return { group: g, mixer: null, actionIdle: null, actionWalk: null, currentAction: null };
-}
-
-// Tạo bảng tên nổi trên đầu (HTML overlay)
-function createNameLabel(name) {
-  const div = document.createElement('div');
-  div.className = 'player-label';
-  div.textContent = name;
-  div.style.cssText = `
-    position:absolute; pointer-events:none; z-index:18;
-    background:rgba(18,15,12,.88);
-    border:1px solid rgba(200,169,110,.7);
-    color:#d4c5a9;
-    font-family:'Space Mono',monospace; font-size:9px;
-    letter-spacing:.1em; padding:3px 8px; border-radius:10px;
-    white-space:nowrap; transform:translateX(-50%);
-    text-shadow:0 0 8px rgba(200,169,110,.4);
-    display:none;
-  `;
-  document.getElementById('wrap').appendChild(div);
-  return div;
-}
-
-// Project 3D world position → 2D screen position
-const _vec3 = new THREE.Vector3();
-function worldToScreen(worldPos) {
-  _vec3.copy(worldPos);
-  _vec3.project(camera);
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  return {
-    x: (_vec3.x * 0.5 + 0.5) * w,
-    y: (-_vec3.y * 0.5 + 0.5) * h,
-    visible: _vec3.z > -1 && _vec3.z < 1
-  };
-}
-
-// Cập nhật vị trí bảng tên theo 3D position
-function updateLabelPos(labelDiv, worldPos) {
-  const above = worldPos.clone(); above.y += 2.15; // trên đầu ~2.15 units
-  const s = worldToScreen(above);
-  if (s.visible) {
-    labelDiv.style.display = 'block';
-    labelDiv.style.left = s.x + 'px';
-    labelDiv.style.top  = s.y + 'px';
-  } else {
-    labelDiv.style.display = 'none';
-  }
-}
-
-// Xóa player đã offline
-function removePlayer(id) {
-  const p = otherPlayers.get(id);
-  if (!p) return;
-  scene.remove(p.group);
-  if (p.mixer) p.mixer.stopAllAction();
-  if (p.labelDiv) p.labelDiv.remove();
-  otherPlayers.delete(id);
-}
-
-// Cleanup players không gửi tín hiệu > 8 giây
-setInterval(() => {
-  const now = Date.now();
-  otherPlayers.forEach((p, id) => {
-    if (now - p.lastSeen > 8000) removePlayer(id);
-  });
-}, 3000);
-
-// Xử lý nhận data từ người khác
-function handlePlayerUpdate(payload) {
-  const { id, name, x, z, ry, moving } = payload;
-  if (id === MY_ID) return; // bỏ qua chính mình
-
-  let p = otherPlayers.get(id);
-  if (!p) {
-    // Người mới vào — thử dùng GLB clone, fallback nếu chưa load
-    const meshData = _glbSource ? createOtherPlayerFromGLB(id) : createOtherPlayerFallback();
-    const labelDiv = createNameLabel(name || ('Khách_' + id.slice(0,4)));
-    p = {
-      ...meshData,
-      labelDiv,
-      walkPhase: 0,
-      lastSeen:  Date.now(),
-      moving:    false,
-      targetX:   x,
-      targetZ:   z,
-      targetRY:  ry
-    };
-    p.group.position.set(x, p.group.position.y, z);
-    p.group.rotation.y = ry;
-    otherPlayers.set(id, p);
-  }
-
-  // Cập nhật target để nội suy mượt
-  p.targetX  = x;
-  p.targetZ  = z;
-  p.targetRY = ry;
-  p.moving   = moving;
-  p.lastSeen = Date.now();
-
-  // Cập nhật tên nếu đổi
-  if (name && p.labelDiv) p.labelDiv.textContent = name;
-}
-
-// Nội suy chuyển động người khác mỗi frame (lerp)
-const _otherClock = new THREE.Clock();
-function updateOtherPlayers() {
-  const delta = _otherClock.getDelta();
-  otherPlayers.forEach((p) => {
-    const g = p.group;
-
-    // Lerp vị trí (giữ nguyên y)
-    g.position.x += (p.targetX - g.position.x) * 0.15;
-    g.position.z += (p.targetZ - g.position.z) * 0.15;
-
-    // Lerp rotation
-    let rd = (p.targetRY || 0) - g.rotation.y;
-    while (rd >  Math.PI) rd -= Math.PI * 2;
-    while (rd < -Math.PI) rd += Math.PI * 2;
-    g.rotation.y += rd * 0.15;
-
-    if (p.mixer) {
-      // GLB clone: switch idle/walk animation
-      if (p.moving) switchOtherAction(p, p.actionWalk || p.actionIdle);
-      else          switchOtherAction(p, p.actionIdle);
-      p.mixer.update(delta);
-    } else {
-      // Fallback geometry animation
-      if (p.moving) p.walkPhase = (p.walkPhase || 0) + 0.18;
-      else          p.walkPhase = (p.walkPhase || 0) * 0.85;
-      const sw = Math.sin(p.walkPhase);
-      const ud = g.userData;
-      if (ud.legLU) {
-        ud.legLU.rotation.x =  sw * 0.45;
-        ud.legLL.rotation.x = -Math.max(0, sw) * 0.4;
-        ud.legRU.rotation.x = -sw * 0.45;
-        ud.legRL.rotation.x =  Math.max(0, -sw) * 0.4;
-        ud.armL.rotation.x  = -sw * 0.4;
-        ud.armR.rotation.x  =  sw * 0.4;
-      }
-    }
-
-    // Cập nhật label
-    updateLabelPos(p.labelDiv, g.position);
-  });
-}
-
-// Kết nối Supabase Realtime Broadcast channel
-const presenceChannel = supabase.channel('gallery-presence-v1', {
-  config: { broadcast: { self: false } }
-});
-
-presenceChannel
-  .on('broadcast', { event: 'move' }, ({ payload }) => {
-    if (payload.offline) { removePlayer(payload.id); return; }
-    handlePlayerUpdate(payload);
-  })
-  .subscribe((status) => {
-    if (status === 'SUBSCRIBED') {
-      broadcastPosition(false);
-    }
-  });
-
-// Gửi vị trí hiện tại
-let lastBroadcastX = null, lastBroadcastZ = null;
-function broadcastPosition(moving) {
-  // Dùng camera.position thay vì charObj.position
-  // charObj.position có CHAR_FRONT offset → thay đổi khi xoay chuột → gây jitter cho người khác
-  const cx = camera.position.x;
-  const cz = camera.position.z;
-  const charObj = (charReady && playerCharacter) ? playerCharacter : fallbackChar;
-  presenceChannel.send({
-    type: 'broadcast',
-    event: 'move',
-    payload: {
-      id:     MY_ID,
-      name:   username,
-      x:      Math.round(cx * 1000) / 1000,
-      z:      Math.round(cz * 1000) / 1000,
-      ry:     Math.round(charObj.rotation.y * 1000) / 1000,
-      moving: moving
-    }
-  });
-  lastBroadcastX = cx; lastBroadcastZ = cz;
-}
-
-// Gửi vị trí ~10 lần/giây
-let broadcastTick = 0;
-const _origAnimate = animate;
-// Patch vào animate loop: gọi updateOtherPlayers mỗi frame,
-// broadcast mỗi ~6 frame (~10fps tại 60fps)
-const _patchedUpdate = () => {
-  broadcastTick++;
-  if (broadcastTick % 6 === 0) {
-    const isMoving2 = (Math.abs(camera.position.x - (lastBroadcastX||0)) > 0.001 ||
-                       Math.abs(camera.position.z - (lastBroadcastZ||0)) > 0.001);
-    broadcastPosition(isMoving2);
-  }
-  updateOtherPlayers();
-};
-
-// Hook vào animate loop bằng cách override renderer.render
-const _origRender = renderer.render.bind(renderer);
-renderer.render = function(s, c) {
-  _origRender(s, c);
-  _patchedUpdate();
-};
-
-// Khi user đổi tên → broadcast lại
-document.getElementById('chat-username-tag').addEventListener('click', () => {
-  setTimeout(() => broadcastPosition(false), 200);
-});
-
-// Gửi "offline" khi tab đóng/rời đi
-window.addEventListener('beforeunload', () => {
-  presenceChannel.send({
-    type: 'broadcast', event: 'move',
-    payload: { id: MY_ID, name: username, x: 9999, z: 9999, ry: 0, moving: false, offline: true }
-  });
-});
 
 })();
 </script>
