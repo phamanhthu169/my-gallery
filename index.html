@@ -1093,7 +1093,7 @@ window.addEventListener('mousemove', e => {
   if (!drag) return;
   yaw   -= (e.clientX - lx) * .004;
   pitch -= (e.clientY - ly) * .003;
-  pitch  = Math.max(-0.8, Math.min(0.3, pitch)); // gioi han de luon thay nhan vat
+  pitch  = Math.max(-0.5, Math.min(0.15, pitch)); // gioi han ngang: luon thay nhan vat
   lx = e.clientX; ly = e.clientY;
 });
 
