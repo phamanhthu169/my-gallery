@@ -1164,11 +1164,12 @@ function animate() {
     if (keys['a'] || keys['arrowleft'])  rawDir.x -= 1;
     if (keys['d'] || keys['arrowright']) rawDir.x += 1;
 
-    let charFacing = yaw;
+    // Ghi nho huong cuoi cung khi di chuyen, khong tu quay lai nhin camera
     if (rawDir.length() > 0) {
       const moveAngle = Math.atan2(rawDir.x, rawDir.z);
-      charFacing = yaw + moveAngle;
+      prevCharFacing = yaw + moveAngle; // cap nhat huong moi nhat
     }
+    const charFacing = prevCharFacing; // giu nguyen huong cuoi
 
     // Tính góc quay (để phát hiện "turn" đột ngột)
     let delta_angle = charFacing - prevCharFacing;
