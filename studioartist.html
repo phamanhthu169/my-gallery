@@ -1940,6 +1940,9 @@ function applyToWall(mesh) {
     clonedTex.wrapT = THREE.RepeatWrapping;
     clonedTex.repeat.set(repeat, repeat);
     clonedTex.needsUpdate = true;
+    // Giữ lại storageUrl để save/load đúng
+    clonedTex.userData = clonedTex.userData || {};
+    clonedTex.userData.storageUrl = selectedWallpaperTexture.userData && selectedWallpaperTexture.userData.storageUrl ? selectedWallpaperTexture.userData.storageUrl : null;
     mesh.material.map = clonedTex;
     mesh.material.color.set(0xffffff);
     mesh.material.needsUpdate = true;
@@ -2059,22 +2062,34 @@ document.getElementById('ws-apply-color-all').addEventListener('click', () => {
 });
 
 // Upload wallpaper
-document.getElementById('fi-wallpaper').addEventListener('change', function(e) {
+document.getElementById('fi-wallpaper').addEventListener('change', async function(e) {
   for (const file of Array.from(e.target.files)) {
-    const url = URL.createObjectURL(file);
+    const localUrl = URL.createObjectURL(file);
+    // Upload lên Supabase Storage để lưu được sau F5
+    let storageUrl = null;
+    try {
+      const { url } = await uploadToStorage(file);
+      storageUrl = url;
+    } catch(err) {
+      toast('Upload wallpaper lỗi: ' + err.message, 'error');
+      storageUrl = localUrl; // fallback blob (sẽ mất sau F5)
+    }
+
     const img = new Image();
     img.onload = () => {
-      const tex = new THREE.TextureLoader().load(url);
+      const tex = new THREE.TextureLoader().load(storageUrl || localUrl);
       tex.wrapS = THREE.RepeatWrapping;
       tex.wrapT = THREE.RepeatWrapping;
       const repeat = parseInt(document.getElementById('ws-tile-repeat').value) || 4;
       tex.repeat.set(repeat, repeat);
-      const entry = { url, img, texture: tex, name: file.name };
+      tex.userData = tex.userData || {};
+      tex.userData.storageUrl = storageUrl; // gắn URL để saveGallery đọc
+      const entry = { url: storageUrl || localUrl, img, texture: tex, name: file.name };
       wallpaperImages.push(entry);
 
       const preview = document.getElementById('ws-wallpaper-preview');
       const wrap = document.createElement('div'); wrap.className = 'wallpaper-thumb-item';
-      const thumbEl = document.createElement('img'); thumbEl.src = url; thumbEl.className = 'wallpaper-thumb';
+      const thumbEl = document.createElement('img'); thumbEl.src = localUrl; thumbEl.className = 'wallpaper-thumb';
       thumbEl.title = file.name;
       thumbEl.addEventListener('click', () => {
         document.querySelectorAll('.wallpaper-thumb').forEach(t => t.classList.remove('sel'));
@@ -2082,7 +2097,7 @@ document.getElementById('fi-wallpaper').addEventListener('change', function(e) {
         selectedWallpaperTexture = tex;
         toast('Đã chọn họa tiết: ' + file.name.substring(0,20), 'info');
       });
-      const removeBtn = document.createElement('button'); removeBtn.className = 'wallpaper-remove'; removeBtn.innerHTML = '✕';
+      const removeBtn = document.createElement('button'); removeBtn.className = 'wallpaper-remove'; removeBtn.innerHTML = '&#10005;';
       removeBtn.title = 'Xoá khỏi danh sách';
       removeBtn.addEventListener('click', ev => {
         ev.stopPropagation();
@@ -2099,7 +2114,7 @@ document.getElementById('fi-wallpaper').addEventListener('change', function(e) {
       selectedWallpaperTexture = tex;
       toast('Đã tải: ' + file.name.substring(0,20), 'success');
     };
-    img.src = url;
+    img.src = localUrl;
   }
   this.value = '';
 });
@@ -2108,11 +2123,13 @@ document.getElementById('fi-wallpaper').addEventListener('change', function(e) {
 document.getElementById('ws-apply-wallpaper-all').addEventListener('click', () => {
   if (!selectedWallpaperTexture) { toast('Hãy chọn một họa tiết trước', 'error'); return; }
   const repeat = parseInt(document.getElementById('ws-tile-repeat').value) || 4;
+  const sUrl = selectedWallpaperTexture.userData && selectedWallpaperTexture.userData.storageUrl ? selectedWallpaperTexture.userData.storageUrl : null;
   let count = 0;
   rooms.forEach(r => r.wallMeshes.forEach(m => {
     const t = selectedWallpaperTexture.clone();
     t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(repeat, repeat); t.needsUpdate = true;
+    t.userData = t.userData || {}; t.userData.storageUrl = sUrl;
     m.material.map = t; m.material.color.set(0xffffff); m.material.needsUpdate = true; count++;
   }));
   toast(`Đã dán họa tiết lên ${count} mặt tường ✓`, 'success');
@@ -2429,7 +2446,7 @@ async function saveGallery() {
       walls:r.wallMeshes.map(m=>({
         dir:m.userData.wallDir,
         color:'#'+m.material.color.getHexString(),
-        wallpaperUrl:m.material.map&&m.material.map.image?m.material.map.image.src||null:null,
+        wallpaperUrl:m.material.map&&m.material.map.userData&&m.material.map.userData.storageUrl?m.material.map.userData.storageUrl:null,
         wallpaperRepeat:m.material.map?[m.material.map.repeat.x,m.material.map.repeat.y]:null
       })),
       floors:r.meshes.filter(m=>m.geometry&&m.geometry.type==='PlaneGeometry'&&Math.abs(m.rotation.x+Math.PI/2)<0.1&&!m.userData.isFloor).map(m=>({
@@ -2450,55 +2467,34 @@ async function loadGallery() {
     const {data,error}=await supabase.from("gallery").select("*").eq("name",GALLERY_NAME).order("created_at",{ascending:false}).limit(1);
     if(error||!data||data.length===0) return;
     const sd=data[0].scene_data;
-    artworks.forEach(a=>{scene.remove(a.group);scene.remove(a.light);scene.remove(a.tgt);}); artworks.length=0;
-    const wrap=document.getElementById('uw-img');
-    if(sd.artworks&&sd.artworks.length>0){
-      for(const a of sd.artworks){
-        const pos=new THREE.Vector3(a.x,a.y,a.z), rot=[0,a.ry||0,0];
-        const scaleVec=a.sx?new THREE.Vector3(a.sx,a.sy,a.sz):null, meta=a.meta||{};
-        if(a.storageUrl){
-          if(a.isVideo){ const vid=document.createElement('video');vid.src=a.storageUrl;vid.loop=true;vid.muted=true;vid.playsInline=true;vid.crossOrigin='anonymous';vid.addEventListener('loadeddata',()=>{const tex=new THREE.VideoTexture(vid);tex.minFilter=THREE.LinearFilter;const art=placeArtwork({type:'user',isVideo:true,texture:tex,videoEl:vid,storageUrl:a.storageUrl},pos,rot,meta,scaleVec);if(a.planeScaleX)art.plane.scale.x=a.planeScaleX;vid.play();});}
-          else{const src=await addImageFromUrl(a.storageUrl,a.storageUrl.split('/').pop(),wrap);if(src){const art=placeArtwork({...src,storageUrl:a.storageUrl},pos,rot,meta,scaleVec);if(a.planeScaleX)art.plane.scale.x=a.planeScaleX;}}
-        } else {const idx=Math.min(3,Math.max(0,parseInt(a.builtinIdx)||0));const art=placeArtwork({canvas:makeArtCanvas(idx),builtinIdx:idx},pos,rot,meta,scaleVec);if(a.planeScaleX)art.plane.scale.x=a.planeScaleX;}
-      }
-    }
-    if(sd.models&&sd.models.length>0){
-      for(const m of sd.models){
-        if(!m.storageUrl)continue;
-        const pos=new THREE.Vector3(m.x,m.y,m.z), ext=(m.name||m.storageUrl).split('.').pop().toLowerCase();
-        await new Promise(resolve=>{
-          const onLoad=(object)=>{
-            // Nếu có scale đã lưu thì dùng luôn, không tính lại
-            if(m.sx){
-              object.scale.set(m.sx,m.sy,m.sz);
-            } else {
-              const box=new THREE.Box3().setFromObject(object);
-              const size=box.getSize(new THREE.Vector3());
-              object.scale.setScalar(1.2/Math.max(size.x,size.y,size.z));
-            }
-            object.position.copy(pos);
-            scene.add(object);
-            const pl=new THREE.PointLight(0xfff0dd,1.5,4);
-            pl.position.set(pos.x,pos.y+2,pos.z); scene.add(pl);
-            const ped=makePedestal(new THREE.Vector3(pos.x,0,pos.z));
-            models3d.push({object,light:pl,pedestal:ped,storageUrl:m.storageUrl||null,name:m.name||null,meta:m.meta||{}});
-            resolve();
-          };
-          const onErr=(err)=>{console.error(err);resolve();};
-          if(ext==='glb'||ext==='gltf')gltfLoader.load(m.storageUrl,(gltf)=>onLoad(gltf.scene),null,onErr);
-          else if(ext==='obj')objLoader.load(m.storageUrl,(obj)=>{obj.traverse(c=>{if(c.isMesh)c.material=new THREE.MeshLambertMaterial({color:0xccbbaa});});onLoad(obj);},null,onErr);
-          else resolve();
-        });
-      }
-    }
-    if(sd.userSpots&&sd.userSpots.length>0) sd.userSpots.forEach(s=>addUserSpotlight(new THREE.Vector3(s.px,s.py,s.pz),new THREE.Vector3(s.tx,s.ty,s.tz),{intensity:s.intensity,color:s.color}));
 
-    // Khôi phục màu tường + giấy dán
+    // ── BƯỚC 1: Rebuild rooms từ DB trước (xoá room mặc định, dựng lại đúng thứ tự) ──
+    if(sd.rooms&&sd.rooms.length>0){
+      // Xoá tất cả rooms hiện tại
+      rooms.forEach(r=>destroyRoom(r));
+      rooms.length=0;
+      // Rebuild từ data đã lưu, giữ nguyên id
+      sd.rooms.forEach(rd=>{
+        const r={
+          id:rd.id, name:rd.name, x:rd.x, z:rd.z, w:rd.w, d:rd.d,
+          floor:rd.floor||0, meshes:[], wallMeshes:[], doorMeshes:[], doors:rd.doors||[], spots:[]
+        };
+        rooms.push(r);
+        buildRoom(r);
+        // Thêm cửa lại
+        if(rd.doors&&rd.doors.length>0) rd.doors.forEach(door=>addDoor(r,door.dir));
+      });
+      // Đồng bộ roomIdCounter để không bị trùng id
+      roomIdCounter = Math.max(...rooms.map(r=>r.id)) + 1;
+      activeRoomId = rooms[0].id;
+      renderRoomList();
+    }
+
+    // ── BƯỚC 2: Khôi phục màu tường + giấy dán (sau khi rooms đã có wallMeshes) ──
     if(sd.wallStyles&&sd.wallStyles.length>0){
       sd.wallStyles.forEach(ws=>{
         const room=rooms.find(r=>r.id===ws.roomId);
         if(!room) return;
-        // Walls
         if(ws.walls) ws.walls.forEach(wdata=>{
           const mesh=room.wallMeshes.find(m=>m.userData.wallDir===wdata.dir);
           if(!mesh) return;
@@ -2511,17 +2507,17 @@ async function loadGallery() {
               tex.needsUpdate=true;
               mesh.material.map=tex; mesh.material.color.set(0xffffff); mesh.material.needsUpdate=true;
             };
+            img.onerror=()=>{ mesh.material.map=null; mesh.material.color.set(wdata.color||'#d8d3ca'); mesh.material.needsUpdate=true; };
             img.src=wdata.wallpaperUrl;
           } else {
             mesh.material.map=null; mesh.material.color.set(wdata.color||'#d8d3ca'); mesh.material.needsUpdate=true;
           }
         });
-        // Floors
         if(ws.floors&&ws.floors.length>0){
           let fi=0;
           room.meshes.forEach(m=>{
             if(m.geometry&&m.geometry.type==='PlaneGeometry'&&Math.abs(m.rotation.x+Math.PI/2)<0.1&&!m.userData.isFloor){
-              if(ws.floors[fi]) { m.material.color.set(ws.floors[fi].color); m.material.needsUpdate=true; }
+              if(ws.floors[fi]){m.material.color.set(ws.floors[fi].color);m.material.needsUpdate=true;}
               fi++;
             }
           });
@@ -2529,12 +2525,56 @@ async function loadGallery() {
       });
     }
 
+    // ── BƯỚC 3: Artworks ──
+    artworks.forEach(a=>{scene.remove(a.group);scene.remove(a.light);scene.remove(a.tgt);}); artworks.length=0;
+    const wrap=document.getElementById('uw-img');
+    if(sd.artworks&&sd.artworks.length>0){
+      for(const a of sd.artworks){
+        const pos=new THREE.Vector3(a.x,a.y,a.z), rot=[0,a.ry||0,0];
+        const scaleVec=a.sx?new THREE.Vector3(a.sx,a.sy,a.sz):null, meta=a.meta||{};
+        if(a.storageUrl){
+          if(a.isVideo){ const vid=document.createElement('video');vid.src=a.storageUrl;vid.loop=true;vid.muted=true;vid.playsInline=true;vid.crossOrigin='anonymous';vid.addEventListener('loadeddata',()=>{const tex=new THREE.VideoTexture(vid);tex.minFilter=THREE.LinearFilter;const art=placeArtwork({type:'user',isVideo:true,texture:tex,videoEl:vid,storageUrl:a.storageUrl},pos,rot,meta,scaleVec);if(a.planeScaleX)art.plane.scale.x=a.planeScaleX;vid.play();});}
+          else{const src=await addImageFromUrl(a.storageUrl,a.storageUrl.split('/').pop(),wrap);if(src){const art=placeArtwork({...src,storageUrl:a.storageUrl},pos,rot,meta,scaleVec);if(a.planeScaleX)art.plane.scale.x=a.planeScaleX;}}
+        } else {const idx=Math.min(3,Math.max(0,parseInt(a.builtinIdx)||0));const art=placeArtwork({canvas:makeArtCanvas(idx),builtinIdx:idx},pos,rot,meta,scaleVec);if(a.planeScaleX)art.plane.scale.x=a.planeScaleX;}
+      }
+    }
+
+    // ── BƯỚC 4: 3D Models ──
+    if(sd.models&&sd.models.length>0){
+      for(const m of sd.models){
+        if(!m.storageUrl)continue;
+        const pos=new THREE.Vector3(m.x,m.y,m.z), ext=(m.name||m.storageUrl).split('.').pop().toLowerCase();
+        await new Promise(resolve=>{
+          const onLoad=(object)=>{
+            if(m.sx){ object.scale.set(m.sx,m.sy,m.sz); }
+            else { const box=new THREE.Box3().setFromObject(object); const size=box.getSize(new THREE.Vector3()); object.scale.setScalar(1.2/Math.max(size.x,size.y,size.z)); }
+            object.position.copy(pos); scene.add(object);
+            const pl=new THREE.PointLight(0xfff0dd,1.5,4); pl.position.set(pos.x,pos.y+2,pos.z); scene.add(pl);
+            const ped=makePedestal(new THREE.Vector3(pos.x,0,pos.z));
+            models3d.push({object,light:pl,pedestal:ped,storageUrl:m.storageUrl||null,name:m.name||null,meta:m.meta||{}});
+            resolve();
+          };
+          const onErr=(err)=>{console.error(err);resolve();};
+          if(ext==='glb'||ext==='gltf')gltfLoader.load(m.storageUrl,(gltf)=>onLoad(gltf.scene),null,onErr);
+          else if(ext==='obj')objLoader.load(m.storageUrl,(obj)=>{obj.traverse(c=>{if(c.isMesh)c.material=new THREE.MeshLambertMaterial({color:0xccbbaa});});onLoad(obj);},null,onErr);
+          else resolve();
+        });
+      }
+    }
+
+    // ── BƯỚC 5: Spotlights ──
+    if(sd.userSpots&&sd.userSpots.length>0) sd.userSpots.forEach(s=>addUserSpotlight(new THREE.Vector3(s.px,s.py,s.pz),new THREE.Vector3(s.tx,s.ty,s.tz),{intensity:s.intensity,color:s.color}));
+
+    // ── BƯỚC 6: Path waypoints ──
     if(sd.pathWaypoints&&sd.pathWaypoints.length>0){
       clearWaypoints();
       sd.pathWaypoints.forEach(wp=>addWaypoint(wp.x,wp.y,wp.z,wp.yaw||0,wp.pitch||0,wp.label||''));
+      currentWpIdx=0; updatePathNavBar();
     }
+
+    drawFloorPlan();
     toast('Gallery đã được khôi phục ✓','success');
-  }catch(e){console.error(e);}
+  }catch(e){console.error('loadGallery error:',e); toast('Lỗi khôi phục: '+e.message,'error');}
 }
 
 document.getElementById('btn-save').addEventListener('click',saveGallery);
