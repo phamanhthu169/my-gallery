@@ -200,6 +200,28 @@
 #toast.success { border-color:#6aaa7a; color:#6aaa7a; }
 #toast.error   { border-color:var(--danger); color:var(--danger); }
 
+/* ── ROOM SWITCHER BAR ── */
+#room-switcher {
+  position:absolute; top:52px; left:50%; transform:translateX(calc(-50% - 80px));
+  display:flex; gap:5px; z-index:12; align-items:center;
+}
+.rsw-btn {
+  background:rgba(15,13,12,.88);
+  border:.5px solid rgba(212,197,169,.25);
+  color:var(--gold-dim);
+  font-family:var(--font-ui); font-size:8px; letter-spacing:.12em; text-transform:uppercase;
+  padding:5px 13px; cursor:pointer; border-radius:var(--radius);
+  transition:all .2s; white-space:nowrap; backdrop-filter:blur(4px);
+}
+.rsw-btn:hover { border-color:var(--gold-dim); color:var(--gold); }
+.rsw-btn.rsw-active {
+  background:rgba(200,169,110,.18);
+  border-color:var(--accent);
+  color:var(--accent);
+  box-shadow:0 0 8px rgba(200,169,110,.25);
+}
+.rsw-sep { width:.5px; height:16px; background:rgba(212,197,169,.15); flex-shrink:0; }
+
 /* ── REMOVE BUTTON ── */
 .remove-btn { position:absolute; top:2px; right:2px; width:16px; height:16px; background:rgba(181,74,58,.85); color:#fff; font-size:8px; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .2s; border-radius:1px; }
 .uw > .item-wrap:hover .remove-btn { opacity:1; }
@@ -494,6 +516,9 @@
     <button class="btn"        id="btn-save"   data-tip="Lưu vào database">💾 Save</button>
     <button class="btn"        id="btn-cam"    data-tip="Reset camera">⌖ Cam</button>
   </div>
+
+  <!-- Room Switcher Bar -->
+  <div id="room-switcher"></div>
 
   <!-- Panel bên phải -->
   <div id="panel">
@@ -1152,6 +1177,9 @@ function createRoom(name, rx, rz, rw, rd, rfloor, skipBuild=false) {
 const room0 = createRoom('Phòng chính', 0, 0, 16, 16, 0);
 activeRoomId = room0.id;
 
+// Phòng thứ 2 — cạnh phòng chính về phía Đông
+const room1 = createRoom('Phòng 2', 16.1, 0, 16, 16, 0);
+
 /* ── CAMERA BOUNDS — can walk everywhere ── */
 function getCameraRoomBounds() {
   // Allow unlimited movement if exterior
@@ -1225,7 +1253,6 @@ function renderSpotList() {
       <div class="lp-row"><span class="lp-label">Màu</span><input type="color" class="lp-color spot-col" data-id="${s.id}" value="${s.color}"></div>
       <div class="lp-row"><span class="lp-label">Hướng X</span><input type="range" class="lp-range spot-dx" data-id="${s.id}" min="-8" max="8" step="0.1" value="${s.target.position.x.toFixed(1)}"></div>
       <div class="lp-row"><span class="lp-label">Hướng Z</span><input type="range" class="lp-range spot-dz" data-id="${s.id}" min="-8" max="8" step="0.1" value="${s.target.position.z.toFixed(1)}"></div>`;
-    item.querySelector('.wp-coords').addEventListener('click', function(ev) { ev.stopPropagation(); travelToWaypoint(i); });
     list.appendChild(item);
   });
   list.querySelectorAll('.spot-del').forEach(btn=>btn.addEventListener('click',()=>removeUserSpotlight(+btn.dataset.id)));
@@ -1452,9 +1479,37 @@ function renderRoomList() {
     if(rooms.length<=1){ toast('Không thể xoá phòng duy nhất','error'); return; }
     destroyRoom(rooms[idx]); rooms.splice(idx,1);
     if(activeRoomId===+btn.dataset.id) activeRoomId=rooms[0].id;
-    renderRoomList(); drawFloorPlan();
+    renderRoomList(); renderRoomSwitcher(); drawFloorPlan();
     toast('Đã xoá phòng','info');
   }));
+}
+
+/* ── ROOM SWITCHER BAR (quick switch) ── */
+function renderRoomSwitcher() {
+  const bar = document.getElementById('room-switcher');
+  bar.innerHTML = '';
+  rooms.forEach((r, i) => {
+    if (i > 0) {
+      const sep = document.createElement('div');
+      sep.className = 'rsw-sep';
+      bar.appendChild(sep);
+    }
+    const btn = document.createElement('button');
+    btn.className = 'rsw-btn' + (r.id === activeRoomId ? ' rsw-active' : '');
+    btn.textContent = r.name;
+    btn.dataset.id = r.id;
+    btn.addEventListener('click', () => {
+      const rm = rooms.find(rm => rm.id === +btn.dataset.id);
+      if (!rm) return;
+      activeRoomId = rm.id;
+      camera.position.set(rm.x, getFloorY(rm.floor) + 1.7, rm.z + rm.d / 4);
+      yaw = 0; pitch = 0;
+      renderRoomSwitcher();
+      renderRoomList();
+      toast('Đã vào: ' + rm.name, 'success');
+    });
+    bar.appendChild(btn);
+  });
 }
 
 // Add room in a direction relative to active room
@@ -1486,7 +1541,7 @@ function addRoomInDirection(dir) {
     addDoor(newRoom, oppositeDir);
   }
 
-  renderRoomList(); drawFloorPlan();
+  renderRoomList(); renderRoomSwitcher(); drawFloorPlan();
   document.getElementById('new-room-name').value=`Phòng ${rooms.length+1}`;
   toast(`Đã thêm "${name}" về phía ${dir}`,'success');
 }
@@ -1504,7 +1559,7 @@ document.getElementById('btn-add-standalone').addEventListener('click',()=>{
   const ox  = (rooms.length%3)*25 - 25;
   const oz  = Math.floor(rooms.length/3)*25;
   const nr  = createRoom(name, ox, oz, nw, nd, nf);
-  activeRoomId=nr.id; renderRoomList(); drawFloorPlan();
+  activeRoomId=nr.id; renderRoomList(); renderRoomSwitcher(); drawFloorPlan();
   toast(`Đã thêm phòng độc lập "${name}"`,'success');
 });
 
@@ -2486,8 +2541,16 @@ async function loadGallery() {
       });
       // Đồng bộ roomIdCounter để không bị trùng id
       roomIdCounter = Math.max(...rooms.map(r=>r.id)) + 1;
+
+      // ── Đảm bảo luôn có ít nhất 2 phòng ──
+      if(rooms.length < 2 && !rooms.find(r=>r.name==='Phòng 2')) {
+        const base = rooms[0];
+        createRoom('Phòng 2', base.x + base.w/2 + 8.1, base.z, 16, 16, base.floor||0);
+      }
+
       activeRoomId = rooms[0].id;
       renderRoomList();
+      renderRoomSwitcher();
     }
 
     // ── BƯỚC 2: Khôi phục màu tường + giấy dán (sau khi rooms đã có wallMeshes) ──
@@ -2573,6 +2636,7 @@ async function loadGallery() {
     }
 
     drawFloorPlan();
+    renderRoomSwitcher();
     toast('Gallery đã được khôi phục ✓','success');
   }catch(e){console.error('loadGallery error:',e); toast('Lỗi khôi phục: '+e.message,'error');}
 }
@@ -2600,6 +2664,7 @@ const channel=supabase.channel("chat-room-v2").on("postgres_changes",{event:"INS
 
 /* ── Initial render of floor plan and room list ── */
 renderRoomList();
+renderRoomSwitcher();
 drawFloorPlan();
 
 })();
