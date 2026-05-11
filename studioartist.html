@@ -446,6 +446,30 @@
   opacity:0; transition:opacity .4s; text-align:center;
 }
 #path-walk-hint.show { opacity:1; }
+
+/* ── PATH NAV BAR ── */
+#path-nav-bar {
+  position:absolute; bottom:50px; left:50%;
+  transform:translateX(calc(-50% - 80px));
+  background:rgba(15,13,12,.94); border:.5px solid var(--accent);
+  border-radius:4px; padding:6px 10px;
+  display:none; align-items:center; gap:8px; z-index:25;
+  font-family:var(--font-ui); backdrop-filter:blur(4px);
+}
+#path-nav-bar.show { display:flex; }
+.pnb-arrow {
+  background:rgba(200,169,110,.12); border:.5px solid rgba(200,169,110,.4);
+  color:var(--accent); font-size:14px; width:28px; height:28px;
+  cursor:pointer; border-radius:3px; display:flex; align-items:center; justify-content:center;
+  transition:all .2s; flex-shrink:0; line-height:1;
+}
+.pnb-arrow:hover { background:rgba(200,169,110,.28); border-color:var(--accent); color:#fff; }
+.pnb-arrow:disabled { opacity:.3; cursor:not-allowed; }
+#pnb-info { display:flex; flex-direction:column; align-items:center; min-width:90px; }
+#pnb-num { color:var(--accent); font-size:11px; letter-spacing:.1em; font-family:var(--font-head); font-style:italic; }
+#pnb-label { color:var(--gold-dim); font-size:7px; letter-spacing:.1em; text-transform:uppercase; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:1px; }
+#pnb-close { background:none; border:.5px solid rgba(212,197,169,.15); color:var(--text-dim); font-size:9px; cursor:pointer; border-radius:2px; padding:2px 6px; letter-spacing:.08em; margin-left:2px; transition:all .2s; }
+#pnb-close:hover { border-color:var(--border-hi); color:var(--gold-dim); }
 </style>
 </head>
 <body style="background:#0f0d0a;">
@@ -549,6 +573,17 @@
     </div>
   </div>
   <div id="path-walk-hint">Click vong tron tren san de di chuyen den diem do</div>
+
+  <!-- Path Navigation Bar -->
+  <div id="path-nav-bar">
+    <button class="pnb-arrow" id="pnb-prev" title="Diem truoc">&#9664;</button>
+    <div id="pnb-info">
+      <span id="pnb-num">1 / 1</span>
+      <span id="pnb-label">&#8212;</span>
+    </div>
+    <button class="pnb-arrow" id="pnb-next" title="Diem tiep theo">&#9654;</button>
+    <button id="pnb-close" title="Dong">&#10005;</button>
+  </div>
 
   <!-- Wall Style Panel -->
   <div id="wall-style-panel">
@@ -2326,6 +2361,56 @@ document.getElementById('pp-add-current').addEventListener('click', () => {
 document.getElementById('pp-clear').addEventListener('click', clearWaypoints);
 
 document.getElementById('pp-auto-gen').addEventListener('click', autoGeneratePath);
+
+/* ── PATH NAV BAR ── */
+let currentWpIdx = 0;
+
+function updatePathNavBar() {
+  var bar = document.getElementById('path-nav-bar');
+  if (pathWaypoints.length === 0) { bar.classList.remove('show'); return; }
+  bar.classList.add('show');
+  if (currentWpIdx >= pathWaypoints.length) currentWpIdx = pathWaypoints.length - 1;
+  if (currentWpIdx < 0) currentWpIdx = 0;
+  var wp = pathWaypoints[currentWpIdx];
+  document.getElementById('pnb-num').textContent = (currentWpIdx + 1) + ' / ' + pathWaypoints.length;
+  document.getElementById('pnb-label').textContent = wp.label || ('Diem ' + (currentWpIdx + 1));
+  document.getElementById('pnb-prev').disabled = (currentWpIdx <= 0);
+  document.getElementById('pnb-next').disabled = (currentWpIdx >= pathWaypoints.length - 1);
+}
+
+document.getElementById('pnb-prev').addEventListener('click', function() {
+  if (currentWpIdx > 0) { currentWpIdx--; travelToWaypoint(currentWpIdx); updatePathNavBar(); }
+});
+document.getElementById('pnb-next').addEventListener('click', function() {
+  if (currentWpIdx < pathWaypoints.length - 1) { currentWpIdx++; travelToWaypoint(currentWpIdx); updatePathNavBar(); }
+});
+document.getElementById('pnb-close').addEventListener('click', function() {
+  document.getElementById('path-nav-bar').classList.remove('show');
+});
+
+// Sync currentWpIdx khi bấm vào disc trên sàn
+canvas.addEventListener('click', function() {
+  if (wpHoveredDisc && mode === 'walk') {
+    var idx = wpHoveredDisc.userData.waypointIdx;
+    if (idx !== undefined) { currentWpIdx = idx; updatePathNavBar(); }
+  }
+}, true);
+
+// Cập nhật nav bar mỗi khi danh sách waypoint thay đổi (dùng MutationObserver)
+new MutationObserver(function() {
+  if (currentWpIdx >= pathWaypoints.length) currentWpIdx = Math.max(0, pathWaypoints.length - 1);
+  updatePathNavBar();
+}).observe(document.getElementById('path-waypoints'), { childList: true });
+
+// Khi thêm điểm hiện tại → chuyển focus về điểm mới
+document.getElementById('pp-add-current').addEventListener('click', function() {
+  setTimeout(function() { currentWpIdx = pathWaypoints.length - 1; updatePathNavBar(); }, 20);
+});
+
+// Khi auto-gen → reset về đầu
+document.getElementById('pp-auto-gen').addEventListener('click', function() {
+  setTimeout(function() { currentWpIdx = 0; updatePathNavBar(); }, 80);
+});
 
 // Click floorplan to add waypoint
 
