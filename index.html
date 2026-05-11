@@ -1124,43 +1124,205 @@ const ceilMat  = new THREE.MeshLambertMaterial({color:0xe8e4de});
 const frameMat = new THREE.MeshLambertMaterial({color:0x1a1006});
 const skirtMat = new THREE.MeshLambertMaterial({color:0xc8c2b5});
 
-/* ─── ROOM GEOMETRY ─── */
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(20,20), floorMat);
-floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
+/* ══════════════════════════════════════════════
+   MULTI-ROOM SYSTEM (đồng bộ với artist)
+══════════════════════════════════════════════ */
+const rooms = []; // { id, name, x, z, w, d, floor, meshes[], wallMeshes[], doorMeshes[], doors[] }
+const doorFrameMat = new THREE.MeshLambertMaterial({color:0x4a3820});
 
-const gridHelper = new THREE.GridHelper(20,20,0x5a4a38,0x5a4a38);
-gridHelper.position.y = .001; scene.add(gridHelper);
+function getFloorY(floor) { return floor * 5.1; }
 
-const ceil = new THREE.Mesh(new THREE.PlaneGeometry(20,20), ceilMat);
-ceil.rotation.x = Math.PI/2; ceil.position.y = 5; scene.add(ceil);
+function buildRoom(rd) {
+  const { id, x, z, w, d, floor } = rd;
+  const fy = getFloorY(floor);
+  const H = 5, hw = w/2, hd = d/2;
+  const meshes = [], wMeshes = [];
 
-const wallMeshes = [];
-[{w:20,h:5,p:[0,2.5,-8],r:[0,0,0],dir:'N'},
- {w:20,h:5,p:[0,2.5,8], r:[0,Math.PI,0],dir:'S'},
- {w:20,h:5,p:[-8,2.5,0],r:[0,Math.PI/2,0],dir:'W'},
- {w:20,h:5,p:[8,2.5,0], r:[0,-Math.PI/2,0],dir:'E'}
-].forEach(({w,h,p,r,dir}) => {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w,h), wallMat.clone());
-  m.position.set(...p); m.rotation.set(...r); m.receiveShadow=true;
-  m.userData.wallDir = dir;
-  scene.add(m); wallMeshes.push(m);
-});
+  // Floor
+  const fl = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat.clone());
+  fl.rotation.x = -Math.PI/2; fl.position.set(x, fy, z); fl.receiveShadow = true;
+  scene.add(fl); meshes.push(fl);
 
-// Skirting
-[-8,8].forEach(x=>{const s=new THREE.Mesh(new THREE.BoxGeometry(.07,.28,16),skirtMat);s.position.set(x+(x>0?-.04:.04),.14,0);scene.add(s);});
-[-8,8].forEach(z=>{const s=new THREE.Mesh(new THREE.BoxGeometry(16,.28,.07),skirtMat);s.position.set(0,.14,z+(z>0?-.04:.04));scene.add(s);});
-// Rails
-[-3,3].forEach(x=>{const r=new THREE.Mesh(new THREE.BoxGeometry(.05,.05,18),new THREE.MeshLambertMaterial({color:0x888880}));r.position.set(x,4.88,0);scene.add(r);});
+  // Grid
+  const gh = new THREE.GridHelper(Math.max(w,d), Math.max(w,d), 0x5a4a38, 0x5a4a38);
+  gh.position.set(x, fy+.001, z); scene.add(gh); meshes.push(gh);
 
-/* ─── DEFAULT SPOTLIGHTS ─── */
-function addSpot(x, z, i=1.6) {
-  const l = new THREE.SpotLight(0xffe0a0, i, 18, Math.PI/5, .55, 1.3);
-  l.position.set(x, 4.85, z); l.target.position.set(x, 0, z);
-  l.castShadow = true; scene.add(l); scene.add(l.target);
-  const b = new THREE.Mesh(new THREE.SphereGeometry(.05,6,6), new THREE.MeshBasicMaterial({color:0xffddaa}));
-  b.position.set(x, 4.85, z); scene.add(b);
+  // Ceiling
+  const ce = new THREE.Mesh(new THREE.PlaneGeometry(w, d), ceilMat.clone());
+  ce.rotation.x = Math.PI/2; ce.position.set(x, fy+H, z); scene.add(ce); meshes.push(ce);
+
+  // Walls
+  const wallDefs = [
+    {ww:w, wh:H, px:x,    py:fy+H/2, pz:z-hd, ry:0,          dir:'N'},
+    {ww:w, wh:H, px:x,    py:fy+H/2, pz:z+hd, ry:Math.PI,    dir:'S'},
+    {ww:d, wh:H, px:x-hw, py:fy+H/2, pz:z,    ry:Math.PI/2,  dir:'W'},
+    {ww:d, wh:H, px:x+hw, py:fy+H/2, pz:z,    ry:-Math.PI/2, dir:'E'},
+  ];
+  wallDefs.forEach(wd => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(wd.ww, wd.wh), wallMat.clone());
+    m.position.set(wd.px, wd.py, wd.pz); m.rotation.y = wd.ry;
+    m.receiveShadow = true; m.userData.roomId = id; m.userData.wallDir = wd.dir;
+    scene.add(m); meshes.push(m); wMeshes.push(m);
+  });
+
+  // Spotlights (4 per room)
+  [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([xi,zi]) => {
+    const l = new THREE.SpotLight(0xffe0a0, 2.0, 18, Math.PI/5, .55, 1.3);
+    l.position.set(x+xi*(w/3), fy+H-.15, z+zi*(d/3));
+    l.target.position.set(x+xi*(w/3), fy, z+zi*(d/3));
+    l.castShadow = false; scene.add(l); scene.add(l.target);
+    const b = new THREE.Mesh(new THREE.SphereGeometry(.05,6,6), new THREE.MeshBasicMaterial({color:0xffddaa}));
+    b.position.copy(l.position); scene.add(b); meshes.push(b);
+  });
+
+  // Floor plane (invisible, for raycasting)
+  const fp = new THREE.Mesh(new THREE.PlaneGeometry(w*.9, d*.9), new THREE.MeshBasicMaterial({visible:false}));
+  fp.rotation.x = -Math.PI/2; fp.position.set(x, fy+.01, z);
+  fp.userData.isFloor = true; fp.userData.roomId = id;
+  scene.add(fp); meshes.push(fp);
+
+  rd.meshes = meshes; rd.wallMeshes = wMeshes;
+  rd.doorMeshes = rd.doorMeshes || [];
+  rd.floorPlane = fp;
+  return rd;
 }
-[[-4,-5],[-1,-5],[2,-5],[-4,0],[-1,0],[2,0],[-4,5],[-1,5],[2,5]].forEach(([x,z])=>addSpot(x,z));
+
+function destroyRoom(rd) {
+  rd.meshes.forEach(m => scene.remove(m));
+  if (rd.doorMeshes) rd.doorMeshes.forEach(m => scene.remove(m));
+}
+
+// Thêm cửa vào phòng (copy từ artist)
+function addDoor(rd, dir, doorCenter) {
+  const {x, z, w, d, floor} = rd;
+  const fy = getFloorY(floor);
+  const H = 5, hw = w/2, hd = d/2;
+  const DW = 2.2, DH = 2.8;
+  const doorMeshes = rd.doorMeshes || [];
+
+  // Xóa tường gốc
+  const wallM = rd.wallMeshes.find(m => m.userData.wallDir === dir);
+  if (wallM) scene.remove(wallM);
+
+  const makeWallPanel = (px, py, pz, pw, ph, ry) => {
+    if (pw < 0.05 || ph < 0.05) return;
+    const mat = wallMat.clone(); mat.side = THREE.DoubleSide;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), mat);
+    m.position.set(px, py, pz); m.rotation.y = ry; m.receiveShadow = true;
+    scene.add(m); doorMeshes.push(m);
+  };
+  const makeFrame = (px, py, pz, fw, fh, fd, ry) => {
+    const fm = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, fd), doorFrameMat);
+    fm.position.set(px, py, pz); fm.rotation.y = ry;
+    scene.add(fm); doorMeshes.push(fm);
+  };
+
+  if (dir === 'N' || dir === 'S') {
+    const dc = (doorCenter !== undefined) ? doorCenter : x;
+    const dcC = Math.max(x-hw+DW/2+.1, Math.min(x+hw-DW/2-.1, dc));
+    const wz = dir==='N' ? z-hd : z+hd;
+    const ry = dir==='N' ? 0 : Math.PI;
+    const aboveH = H - DH;
+    const leftW  = dcC-DW/2-(x-hw);
+    const rightW = (x+hw)-(dcC+DW/2);
+    if (leftW  > .05) makeWallPanel(x-hw+leftW/2,  fy+H/2,          wz, leftW,  H,      ry);
+    if (rightW > .05) makeWallPanel(x+hw-rightW/2, fy+H/2,          wz, rightW, H,      ry);
+    if (aboveH > .05) makeWallPanel(dcC,            fy+DH+aboveH/2, wz, DW,    aboveH, ry);
+    makeFrame(dcC,            fy+DH,   wz, DW+.18, .12, .12, ry);
+    makeFrame(dcC-DW/2-.06, fy+DH/2, wz, .12, DH,  .12, ry);
+    makeFrame(dcC+DW/2+.06, fy+DH/2, wz, .12, DH,  .12, ry);
+  } else {
+    const dc = (doorCenter !== undefined) ? doorCenter : z;
+    const dcC = Math.max(z-hd+DW/2+.1, Math.min(z+hd-DW/2-.1, dc));
+    const wx = dir==='W' ? x-hw : x+hw;
+    const ry = dir==='W' ? Math.PI/2 : -Math.PI/2;
+    const aboveH = H - DH;
+    const leftW  = dcC-DW/2-(z-hd);
+    const rightW = (z+hd)-(dcC+DW/2);
+    if (leftW  > .05) makeWallPanel(wx, fy+H/2,          z-hd+leftW/2,  leftW,  H,      ry);
+    if (rightW > .05) makeWallPanel(wx, fy+H/2,          z+hd-rightW/2, rightW, H,      ry);
+    if (aboveH > .05) makeWallPanel(wx, fy+DH+aboveH/2, dcC,            DW,    aboveH, ry);
+    makeFrame(wx, fy+DH,   dcC,            DW+.18, .12, .12, ry);
+    makeFrame(wx, fy+DH/2, dcC-DW/2-.06, .12, DH,  .12,      ry);
+    makeFrame(wx, fy+DH/2, dcC+DW/2+.06, .12, DH,  .12,      ry);
+  }
+  rd.doorMeshes = doorMeshes;
+  rd.doors.push({dir, doorCenter});
+}
+
+function getAllWallMeshes() {
+  const wm = [];
+  rooms.forEach(r => {
+    r.wallMeshes.forEach(m => wm.push(m));
+    if (r.doorMeshes) r.doorMeshes.forEach(m => { if (m.geometry && m.geometry.type === 'PlaneGeometry') wm.push(m); });
+  });
+  return wm;
+}
+
+// Collision detection (copy từ artist)
+function canMoveTo(pos) {
+  const cFloor = getCurrentCameraFloor();
+  const PLAYER_R = 0.30, DW = 2.2, DOOR_HALF = DW/2-.1, WALL_THICK = 0.5;
+  const getDC = (room, dir) => {
+    const door = room.doors ? room.doors.find(d=>d.dir===dir) : null;
+    if (!door) return null;
+    if (door.doorCenter !== undefined && door.doorCenter !== null) return door.doorCenter;
+    return (dir==='N'||dir==='S') ? room.x : room.z;
+  };
+  const isPassable = (room, dir, along) => {
+    const dc = getDC(room, dir);
+    if (dc !== null && Math.abs(along-dc) < DOOR_HALF) return true;
+    const opposite = {N:'S',S:'N',E:'W',W:'E'};
+    const opp = opposite[dir];
+    for (const other of rooms) {
+      if (other===room || other.floor!==cFloor) continue;
+      let wallMatches = false;
+      if (dir==='E' && Math.abs((room.x+room.w/2)-(other.x-other.w/2)) < WALL_THICK) wallMatches=true;
+      if (dir==='W' && Math.abs((room.x-room.w/2)-(other.x+other.w/2)) < WALL_THICK) wallMatches=true;
+      if (dir==='N' && Math.abs((room.z-room.d/2)-(other.z+other.d/2)) < WALL_THICK) wallMatches=true;
+      if (dir==='S' && Math.abs((room.z+room.d/2)-(other.z-other.d/2)) < WALL_THICK) wallMatches=true;
+      if (!wallMatches) continue;
+      const dc2 = getDC(other, opp);
+      if (dc2 !== null && Math.abs(along-dc2) < DOOR_HALF) return true;
+    }
+    return false;
+  };
+  for (const room of rooms) {
+    if (room.floor !== cFloor) continue;
+    const rx=room.x, rz=room.z, hw=room.w/2, hd=room.d/2;
+    if (!(pos.x>rx-hw-1.5 && pos.x<rx+hw+1.5 && pos.z>rz-hd-1.5 && pos.z<rz+hd+1.5)) continue;
+    if (Math.abs(pos.z-(rz-hd))<PLAYER_R && pos.x>rx-hw && pos.x<rx+hw) { if(!isPassable(room,'N',pos.x)) return false; }
+    if (Math.abs(pos.z-(rz+hd))<PLAYER_R && pos.x>rx-hw && pos.x<rx+hw) { if(!isPassable(room,'S',pos.x)) return false; }
+    if (Math.abs(pos.x-(rx-hw))<PLAYER_R && pos.z>rz-hd && pos.z<rz+hd) { if(!isPassable(room,'W',pos.z)) return false; }
+    if (Math.abs(pos.x-(rx+hw))<PLAYER_R && pos.z>rz-hd && pos.z<rz+hd) { if(!isPassable(room,'E',pos.z)) return false; }
+  }
+  return true;
+}
+
+function getCurrentCameraFloor() {
+  const y = camera.position.y;
+  for (let f=2; f>=0; f--) { if (y >= getFloorY(f)-.5) return f; }
+  return 0;
+}
+
+function getCameraRoomBounds() {
+  let minX=Infinity, maxX=-Infinity, minZ=Infinity, maxZ=-Infinity;
+  const cFloor = getCurrentCameraFloor();
+  rooms.forEach(r => {
+    if (r.floor !== cFloor) return;
+    minX=Math.min(minX,r.x-r.w/2+.5); maxX=Math.max(maxX,r.x+r.w/2-.5);
+    minZ=Math.min(minZ,r.z-r.d/2+.5); maxZ=Math.max(maxZ,r.z+r.d/2-.5);
+  });
+  if (minX===Infinity) return {minX:-8,maxX:8,minZ:-8,maxZ:8};
+  return {minX:minX-.5, maxX:maxX+.5, minZ:minZ-.5, maxZ:maxZ+.5};
+}
+
+// Tạo phòng mặc định (trước khi load DB)
+function createDefaultRoom() {
+  const rd = {id:0, name:'Phòng chính', x:0, z:0, w:16, d:16, floor:0, meshes:[], wallMeshes:[], doorMeshes:[], doors:[]};
+  rooms.push(rd); buildRoom(rd);
+}
+createDefaultRoom();
 
 /* ─── ARTWORKS ─── */
 const artworks = [];
@@ -1294,6 +1456,7 @@ async function loadGallery() {
           new THREE.Vector3(...a.p), a.r)
       );
       setTimeout(hideLoad, 600);
+      renderMinimapRoomChips();
       renderProductList();
       return;
     }
@@ -1436,12 +1599,39 @@ async function loadGallery() {
       updateHideBtn();
     }
 
-    // Khôi phục màu tường + giấy dán
+    // ── Rebuild rooms từ DB ──
+    if (sd.rooms && sd.rooms.length > 0) {
+      // Xóa phòng mặc định
+      rooms.forEach(r => destroyRoom(r)); rooms.length = 0;
+      // Dựng lại từ DB
+      sd.rooms.forEach(rdata => {
+        const rd = {
+          id: rdata.id, name: rdata.name,
+          x: rdata.x, z: rdata.z, w: rdata.w, d: rdata.d,
+          floor: rdata.floor || 0,
+          meshes: [], wallMeshes: [], doorMeshes: [], doors: []
+        };
+        rooms.push(rd);
+        buildRoom(rd);
+        // Thêm cửa
+        if (rdata.doors && rdata.doors.length > 0) {
+          rdata.doors.forEach(door => addDoor(rd, door.dir, door.doorCenter));
+        }
+      });
+      // Teleport camera vào phòng đầu tiên
+      const r0 = rooms[0];
+      if (r0) camera.position.set(r0.x, getFloorY(r0.floor)+1.7, r0.z + r0.d/4);
+      // Cập nhật room chips trên minimap
+      renderMinimapRoomChips();
+    }
+
+    // ── Khôi phục màu tường + giấy dán ──
     if (sd.wallStyles && sd.wallStyles.length > 0) {
-      const ws = sd.wallStyles[0]; // published chỉ có 1 phòng (room0)
-      if (ws && ws.walls) {
-        ws.walls.forEach(wdata => {
-          const mesh = wallMeshes.find(m => m.userData.wallDir === wdata.dir);
+      sd.wallStyles.forEach(ws => {
+        const room = rooms.find(r => r.id === ws.roomId);
+        if (!room) return;
+        if (ws.walls) ws.walls.forEach(wdata => {
+          const mesh = room.wallMeshes.find(m => m.userData.wallDir === wdata.dir);
           if (!mesh) return;
           if (wdata.wallpaperUrl) {
             const img = new Image(); img.crossOrigin = 'anonymous';
@@ -1452,6 +1642,7 @@ async function loadGallery() {
               tex.needsUpdate = true;
               mesh.material.map = tex; mesh.material.color.set(0xffffff); mesh.material.needsUpdate = true;
             };
+            img.onerror = () => { mesh.material.map=null; mesh.material.color.set(wdata.color||'#d8d3ca'); mesh.material.needsUpdate=true; };
             img.src = wdata.wallpaperUrl;
           } else {
             mesh.material.map = null;
@@ -1459,11 +1650,16 @@ async function loadGallery() {
             mesh.material.needsUpdate = true;
           }
         });
-      }
-      if (ws && ws.floors && ws.floors[0]) {
-        floor.material.color.set(ws.floors[0].color);
-        floor.material.needsUpdate = true;
-      }
+        if (ws.floors && ws.floors.length > 0) {
+          let fi = 0;
+          room.meshes.forEach(m => {
+            if (m.geometry && m.geometry.type==='PlaneGeometry' && Math.abs(m.rotation.x+Math.PI/2)<.1 && !m.userData.isFloor) {
+              if (ws.floors[fi]) { m.material.color.set(ws.floors[fi].color); m.material.needsUpdate=true; }
+              fi++;
+            }
+          });
+        }
+      });
     }
 
     setLoad(100, 'Sẵn sàng!');
@@ -2284,7 +2480,7 @@ window.addEventListener('mousemove', e => {
 
 const moveDir = new THREE.Vector3();
 
-/* ─── MINIMAP ─── */
+/* ─── MINIMAP (multi-room) ─── */
 const mmCanvas = document.getElementById('minimap-canvas');
 const mmCtx    = mmCanvas.getContext('2d');
 let mmExpanded = false;
@@ -2295,62 +2491,95 @@ document.getElementById('minimap-expand-btn').addEventListener('click', () => {
   wrap.classList.toggle('expanded', mmExpanded);
   document.getElementById('minimap-expand-btn').textContent = mmExpanded ? '⤡' : '⤢';
   document.getElementById('minimap-expand-btn').title = mmExpanded ? 'Thu nhỏ' : 'Mở rộng';
-  // Sync canvas resolution
   const cw = mmExpanded ? 200 : 96;
   mmCanvas.width = cw; mmCanvas.height = cw;
 });
 
-// Room chip interaction (placeholder — future multi-room support)
-document.querySelectorAll('.mm-room-chip').forEach(chip => {
-  chip.addEventListener('click', () => {
-    document.querySelectorAll('.mm-room-chip').forEach(c => c.classList.remove('active'));
-    chip.classList.add('active');
-    toast('Phòng ' + chip.dataset.room + ' · Đang phát triển', 'info', 2000);
+function renderMinimapRoomChips() {
+  const container = document.getElementById('minimap-rooms');
+  container.innerHTML = '';
+  rooms.forEach((r, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'mm-room-chip' + (i===0 ? ' active' : '');
+    chip.textContent = r.name;
+    chip.dataset.roomId = r.id;
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.mm-room-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      camera.position.set(r.x, getFloorY(r.floor)+1.7, r.z+r.d/4);
+      yaw = 0; pitch = 0;
+      toast('Đến: ' + r.name, 'info', 1800);
+    });
+    container.appendChild(chip);
   });
-});
+}
 
 function drawMinimap() {
-  const S   = mmCanvas.width;
-  const pad = Math.round(S * 0.08);
-  const size = S - pad*2;
-  const scale = size / 20;
-
+  const S = mmCanvas.width;
   mmCtx.clearRect(0,0,S,S);
-  // Background
-  mmCtx.fillStyle='rgba(10,8,6,.85)'; mmCtx.fillRect(0,0,S,S);
+  mmCtx.fillStyle='rgba(10,8,6,.9)'; mmCtx.fillRect(0,0,S,S);
 
-  // Room border with label
-  mmCtx.strokeStyle='rgba(212,197,169,.25)'; mmCtx.lineWidth=1;
-  mmCtx.strokeRect(pad, pad, size, size);
+  if (rooms.length === 0) return;
 
-  // Room fill subtle
-  mmCtx.fillStyle='rgba(212,197,169,.03)';
-  mmCtx.fillRect(pad, pad, size, size);
+  // Tính bounds tổng tất cả phòng
+  let minX=Infinity, maxX=-Infinity, minZ=Infinity, maxZ=-Infinity;
+  rooms.forEach(r => {
+    minX=Math.min(minX,r.x-r.w/2); maxX=Math.max(maxX,r.x+r.w/2);
+    minZ=Math.min(minZ,r.z-r.d/2); maxZ=Math.max(maxZ,r.z+r.d/2);
+  });
+  const pad = Math.round(S*.1);
+  const spanX = maxX-minX || 20, spanZ = maxZ-minZ || 20;
+  const scaleX = (S-pad*2)/spanX, scaleZ = (S-pad*2)/spanZ;
+  const scale  = Math.min(scaleX, scaleZ);
+  const ox = pad + ((S-pad*2) - spanX*scale)/2 - minX*scale;
+  const oz = pad + ((S-pad*2) - spanZ*scale)/2 - minZ*scale;
 
-  // Grid lines (when expanded)
-  if (mmExpanded) {
-    mmCtx.strokeStyle='rgba(212,197,169,.07)'; mmCtx.lineWidth=.5;
-    for (let i=1;i<4;i++) {
-      const x=pad+size*i/4; const y=pad+size*i/4;
-      mmCtx.beginPath(); mmCtx.moveTo(x,pad); mmCtx.lineTo(x,pad+size); mmCtx.stroke();
-      mmCtx.beginPath(); mmCtx.moveTo(pad,y); mmCtx.lineTo(pad+size,y); mmCtx.stroke();
+  const toMM = (wx, wz) => [ox + wx*scale, oz + wz*scale];
+
+  // Phòng
+  const cFloor = getCurrentCameraFloor();
+  const floorColors = ['rgba(90,78,62,.7)','rgba(60,78,100,.7)','rgba(78,100,60,.7)'];
+  rooms.forEach(r => {
+    if (r.floor !== cFloor) return; // chỉ vẽ tầng camera đang ở
+    const [fx1,fz1] = toMM(r.x-r.w/2, r.z-r.d/2);
+    const [fx2,fz2] = toMM(r.x+r.w/2, r.z+r.d/2);
+    const rw=fx2-fx1, rd=fz2-fz1;
+    mmCtx.fillStyle = floorColors[r.floor]||floorColors[0];
+    mmCtx.fillRect(fx1,fz1,rw,rd);
+    mmCtx.strokeStyle='rgba(212,197,169,.4)'; mmCtx.lineWidth=.8;
+    mmCtx.strokeRect(fx1,fz1,rw,rd);
+    // Tên phòng
+    if (S > 100 && rw > 20) {
+      mmCtx.fillStyle='rgba(212,197,169,.6)';
+      mmCtx.font = `${Math.min(8, rw*.12)}px Space Mono,monospace`;
+      mmCtx.textAlign='center'; mmCtx.textBaseline='middle';
+      mmCtx.fillText(r.name.substring(0,10), fx1+rw/2, fz1+rd/2);
     }
-  }
-
-  // Artworks (gold rectangles)
-  artworks.forEach(a => {
-    const mx = (a.group.position.x+10)*scale + pad;
-    const my = (a.group.position.z+10)*scale + pad;
-    const sz = mmExpanded ? 5 : 3;
-    mmCtx.fillStyle='rgba(200,169,110,.8)';
-    mmCtx.fillRect(mx-sz/2, my-sz*0.4, sz, sz*0.8);
+    // Cửa
+    if (r.doors) r.doors.forEach(door => {
+      mmCtx.strokeStyle='rgba(200,169,110,.9)'; mmCtx.lineWidth=2;
+      const DW = scale*2.2;
+      const [cx2,cz2] = toMM(r.x, r.z);
+      if (door.dir==='N'){const [dx]=toMM(door.doorCenter||r.x,0);mmCtx.clearRect(dx-DW/2,fz1-1,DW,3);mmCtx.strokeRect(dx-DW/2,fz1-1,DW,3);}
+      if (door.dir==='S'){const [dx]=toMM(door.doorCenter||r.x,0);mmCtx.clearRect(dx-DW/2,fz2-1,DW,3);mmCtx.strokeRect(dx-DW/2,fz2-1,DW,3);}
+      if (door.dir==='W'){const [,dz]=toMM(0,door.doorCenter||r.z);mmCtx.clearRect(fx1-1,dz-DW/2,3,DW);mmCtx.strokeRect(fx1-1,dz-DW/2,3,DW);}
+      if (door.dir==='E'){const [,dz]=toMM(0,door.doorCenter||r.z);mmCtx.clearRect(fx2-1,dz-DW/2,3,DW);mmCtx.strokeRect(fx2-1,dz-DW/2,3,DW);}
+    });
   });
 
-  // Camera arrow
-  const cx=(camera.position.x+10)*scale+pad;
-  const cy=(camera.position.z+10)*scale+pad;
+  // Tranh
+  artworks.forEach(a => {
+    if (!a.group) return;
+    const [mx,mz] = toMM(a.group.position.x, a.group.position.z);
+    const sz = mmExpanded ? 4 : 3;
+    mmCtx.fillStyle='rgba(200,169,110,.8)';
+    mmCtx.fillRect(mx-sz/2, mz-sz*.4, sz, sz*.8);
+  });
+
+  // Camera
+  const [cx,cy2] = toMM(camera.position.x, camera.position.z);
   const arrowSize = mmExpanded ? 7 : 5;
-  mmCtx.save(); mmCtx.translate(cx,cy); mmCtx.rotate(-yaw);
+  mmCtx.save(); mmCtx.translate(cx,cy2); mmCtx.rotate(-yaw);
   mmCtx.fillStyle='#c8a96e';
   mmCtx.shadowColor='rgba(200,169,110,.6)'; mmCtx.shadowBlur=4;
   mmCtx.beginPath();
@@ -2479,8 +2708,8 @@ function updateCharacter(isMoving) {
     while (rot_delta < -Math.PI) rot_delta += Math.PI * 2;
     playerCharacter.rotation.y += rot_delta * 0.2;
 
-    playerCharacter.position.x = Math.max(-6.5, Math.min(6.5, camera.position.x + offset.x));
-    playerCharacter.position.z = Math.max(-6.5, Math.min(6.5, camera.position.z + offset.z));
+    playerCharacter.position.x = camera.position.x + offset.x;
+    playerCharacter.position.z = camera.position.z + offset.z;
     playerCharacter.position.y = window.__charGroundOffset || 0;
 
     // Switch animation
@@ -2496,8 +2725,8 @@ function updateCharacter(isMoving) {
     while (fb_delta < -Math.PI) fb_delta += Math.PI * 2;
     fallbackChar.rotation.y += fb_delta * 0.2;
 
-    fallbackChar.position.x = Math.max(-6.5, Math.min(6.5, camera.position.x + offset.x));
-    fallbackChar.position.z = Math.max(-6.5, Math.min(6.5, camera.position.z + offset.z));
+    fallbackChar.position.x = camera.position.x + offset.x;
+    fallbackChar.position.z = camera.position.z + offset.z;
     fallbackChar.position.y = 0;
 
     if (isMoving) charWalkPhase += 0.18;
@@ -2525,13 +2754,22 @@ function animate() {
   if (keys['a']||keys['arrowleft'])  moveDir.x-=1;
   if (keys['d']||keys['arrowright']) moveDir.x+=1;
 
-  const _isMoving = moveDir.length() > 0;
+  const _isMoving = moveDir.length() > 0 && !wpTravelTarget;
   if (_isMoving) {
     moveDir.normalize().applyEuler(new THREE.Euler(0,yaw,0));
-    camera.position.addScaledVector(moveDir, walkSpeed);
-    camera.position.x = Math.max(-7.5, Math.min(7.5, camera.position.x));
-    camera.position.z = Math.max(-7.5, Math.min(7.5, camera.position.z));
-    camera.position.y = 1.7;
+    const oldX = camera.position.x, oldZ = camera.position.z;
+    const newX = oldX + moveDir.x * walkSpeed;
+    const newZ = oldZ + moveDir.z * walkSpeed;
+    // Sliding collision vs walls/doors
+    const posX = new THREE.Vector3(newX, camera.position.y, oldZ);
+    const posZ = new THREE.Vector3(oldX, camera.position.y, newZ);
+    camera.position.x = canMoveTo(posX) ? newX : oldX;
+    camera.position.z = canMoveTo(posZ) ? newZ : oldZ;
+    // Clamp trong bounds đa phòng
+    const b = getCameraRoomBounds();
+    camera.position.x = Math.max(b.minX, Math.min(b.maxX, camera.position.x));
+    camera.position.z = Math.max(b.minZ, Math.min(b.maxZ, camera.position.z));
+    camera.position.y = getFloorY(getCurrentCameraFloor()) + 1.7;
   }
 
   // Cap nhat nhan vat 3D
