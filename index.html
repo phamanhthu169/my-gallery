@@ -635,6 +635,11 @@ body { background:#1a1714; overflow:hidden; font-family:var(--font-ui); }
 /* ══════════════════════════════════════
    PATH / WAYPOINT
 ══════════════════════════════════════ */
+#path-wrap {
+  position:relative;
+  width:100%;
+  display:flex; flex-direction:column; align-items:flex-start; gap:0;
+}
 #path-toggle-btn {
   display:flex; align-items:center; gap:7px;
   background:rgba(18,15,12,.9); border:.5px solid var(--border);
@@ -670,48 +675,72 @@ body { background:#1a1714; overflow:hidden; font-family:var(--font-ui); }
 }
 #path-walk-hint.show { opacity:1; }
 
-/* ── PATH NAV BAR ── */
-#path-nav-bar {
-  position:absolute; bottom:14px; left:50%;
-  transform:translateX(-50%);
-  background:rgba(18,15,12,.96); border:.5px solid var(--accent);
-  border-radius:24px; padding:6px 10px;
-  display:none; align-items:center; gap:8px; z-index:25;
-  backdrop-filter:blur(10px);
-  box-shadow:0 4px 24px rgba(200,169,110,.18);
+/* ── PATH NAV POPUP (mở lên từ nút Lộ trình) ── */
+#path-nav-popup {
+  width:200px;
+  background:rgba(18,15,12,.97);
+  border:.5px solid var(--accent);
+  border-radius:var(--radius);
+  overflow:hidden;
+  display:none; flex-direction:column;
+  box-shadow:0 8px 32px rgba(0,0,0,.5);
+  margin-bottom:6px;
 }
-#path-nav-bar.show { display:flex; }
-.pnb-arrow {
-  width:32px; height:32px;
-  background:rgba(200,169,110,.1); border:.5px solid rgba(200,169,110,.35);
-  color:var(--accent); font-size:14px;
-  cursor:pointer; border-radius:50%;
-  display:flex; align-items:center; justify-content:center;
-  transition:all .2s; flex-shrink:0; line-height:1;
+#path-nav-popup.open { display:flex; }
+
+#pnp-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:8px 12px;
+  background:rgba(200,169,110,.07);
+  border-bottom:.5px solid rgba(200,169,110,.2);
 }
-.pnb-arrow:hover { background:rgba(200,169,110,.3); border-color:var(--accent); color:#fff; transform:scale(1.08); }
-.pnb-arrow:disabled { opacity:.28; cursor:not-allowed; transform:none; }
-#pnb-info {
-  display:flex; flex-direction:column; align-items:center;
-  min-width:100px; gap:1px;
+#pnp-title {
+  font-family:var(--font-mono); font-size:7px; letter-spacing:.18em;
+  text-transform:uppercase; color:var(--accent);
 }
-#pnb-num {
-  font-family:var(--font-head); font-size:13px; font-style:italic;
-  color:var(--accent); letter-spacing:.06em;
-}
-#pnb-label {
+#pnp-count {
   font-family:var(--font-mono); font-size:7px; letter-spacing:.1em;
+  color:var(--gold-dim);
+}
+
+#pnp-body {
+  display:flex; align-items:center; gap:8px;
+  padding:10px 12px;
+}
+.pnp-arrow {
+  width:30px; height:30px; flex-shrink:0;
+  background:rgba(200,169,110,.08); border:.5px solid rgba(200,169,110,.3);
+  color:var(--accent); font-size:13px; cursor:pointer; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  transition:all .18s; line-height:1;
+}
+.pnp-arrow:hover { background:rgba(200,169,110,.25); border-color:var(--accent); color:#fff; transform:scale(1.1); }
+.pnp-arrow:disabled { opacity:.25; cursor:not-allowed; transform:none; }
+#pnp-info { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; min-width:0; }
+#pnp-num {
+  font-family:var(--font-head); font-size:14px; font-style:italic;
+  color:var(--accent); letter-spacing:.06em; line-height:1;
+}
+#pnp-label {
+  font-family:var(--font-mono); font-size:7px; letter-spacing:.08em;
   text-transform:uppercase; color:var(--gold-dim);
-  max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  width:100%; text-align:center;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
-#pnb-close {
-  width:22px; height:22px;
-  background:none; border:.5px solid rgba(212,197,169,.15);
-  color:var(--text-dim); font-size:8px; cursor:pointer;
-  border-radius:50%; display:flex; align-items:center; justify-content:center;
-  margin-left:2px; transition:all .2s; flex-shrink:0;
+
+#pnp-footer {
+  border-top:.5px solid rgba(212,197,169,.08);
+  padding:7px 12px;
 }
-#pnb-close:hover { border-color:var(--border-hi); color:var(--gold-dim); }
+#pnp-hide-btn {
+  width:100%; padding:5px 0;
+  background:rgba(212,197,169,.05); border:.5px solid rgba(212,197,169,.15);
+  color:var(--gold-dim); font-family:var(--font-mono); font-size:7px;
+  letter-spacing:.12em; text-transform:uppercase; cursor:pointer;
+  border-radius:var(--radius-sm); transition:all .18s;
+}
+#pnp-hide-btn:hover { background:rgba(212,197,169,.12); border-color:var(--border-hi); color:var(--gold); }
+#pnp-hide-btn.path-hidden { color:var(--accent); border-color:rgba(200,169,110,.4); background:rgba(200,169,110,.08); }
 
 /* ══════════════════════════════════════
    LIKE BUTTON animation
@@ -814,10 +843,31 @@ body { background:#1a1714; overflow:hidden; font-family:var(--font-ui); }
     <div class="icon-btn" id="btn-settings" title="Cài đặt">⚙</div>
     <div class="icon-btn" id="btn-help" title="Hướng dẫn sử dụng">?</div>
 
-    <!-- PATH TOGGLE -->
-    <div id="path-toggle-btn">
-      <span>🛤</span>
-      <span id="path-btn-label">Lộ trình</span>
+    <!-- PATH WRAP (popup mở lên, giống chat) -->
+    <div id="path-wrap">
+      <!-- Popup nav: mở lên phía trên nút -->
+      <div id="path-nav-popup">
+        <div id="pnp-header">
+          <span id="pnp-title">🛤 Lộ trình</span>
+          <span id="pnp-count">0 điểm</span>
+        </div>
+        <div id="pnp-body">
+          <button class="pnp-arrow" id="pnp-prev" title="Điểm trước">&#9664;</button>
+          <div id="pnp-info">
+            <span id="pnp-num">1 / 1</span>
+            <span id="pnp-label">&#8212;</span>
+          </div>
+          <button class="pnp-arrow" id="pnp-next" title="Điểm tiếp theo">&#9654;</button>
+        </div>
+        <div id="pnp-footer">
+          <button id="pnp-hide-btn">&#128065; Ẩn lộ trình</button>
+        </div>
+      </div>
+      <!-- Nút bấm -->
+      <div id="path-toggle-btn">
+        <span>🛤</span>
+        <span id="path-btn-label">Lộ trình</span>
+      </div>
     </div>
 
     <!-- CHAT TOGGLE (inline in left-column, opens box upward) -->
@@ -919,17 +969,6 @@ body { background:#1a1714; overflow:hidden; font-family:var(--font-ui); }
 
   <!-- RIGHT PANEL: product list -->
   <div id="controls-bar">W A S D · Kéo chuột để xoay · Click tranh để xem</div>
-
-  <!-- PATH NAV BAR -->
-  <div id="path-nav-bar">
-    <button class="pnb-arrow" id="pnb-prev" title="Điểm trước">&#9664;</button>
-    <div id="pnb-info">
-      <span id="pnb-num">1 / 1</span>
-      <span id="pnb-label">&#8212;</span>
-    </div>
-    <button class="pnb-arrow" id="pnb-next" title="Điểm tiếp theo">&#9654;</button>
-    <button id="pnb-close" title="Đóng">&#10005;</button>
-  </div>
 
   <!-- HELP OVERLAY -->
   <div id="help-overlay">
@@ -1390,9 +1429,11 @@ async function loadGallery() {
       const btn = document.getElementById('path-toggle-btn');
       btn.classList.add('active');
       btn.title = `${sd.pathWaypoints.length} điểm tham quan`;
-      // Hiện nav bar ngay từ đầu
+      // Mở popup và cập nhật
       currentWpIdx = 0;
-      updatePathNavBar();
+      document.getElementById('path-nav-popup').classList.add('open');
+      updatePathPopup();
+      updateHideBtn();
     }
 
     // Khôi phục màu tường + giấy dán
@@ -1582,65 +1623,81 @@ canvas.addEventListener('click', function(e) {
   if (idx !== undefined) travelToWaypoint(idx);
 }, true);
 
-// Path toggle button
+// Path toggle button — mở/đóng popup
 document.getElementById('path-toggle-btn').addEventListener('click', () => {
   if (pathWaypoints.length === 0) {
     toast('Phòng tranh này chưa có lộ trình', 'info', 2500);
     return;
   }
-  const btn = document.getElementById('path-toggle-btn');
-  if (!pathActive) {
-    setPathVisible(true);
-    btn.classList.add('active');
-    // Show hint on first open
-    const hint = document.getElementById('path-walk-hint');
-    hint.classList.add('show');
-    setTimeout(() => hint.classList.remove('show'), 4000);
-    toast(`Lộ trình: ${pathWaypoints.length} điểm tham quan`, 'success', 2500);
-    // Hiện nav bar khi bật lộ trình
-    updatePathNavBar();
+  const popup = document.getElementById('path-nav-popup');
+  const isOpen = popup.classList.contains('open');
+  if (!isOpen) {
+    // Mở popup + bật discs nếu chưa bật
+    popup.classList.add('open');
+    document.getElementById('path-toggle-btn').classList.add('active');
+    if (!pathActive) {
+      setPathVisible(true);
+      updateHideBtn();
+    }
+    updatePathPopup();
   } else {
-    setPathVisible(false);
-    btn.classList.remove('active');
-    // Ẩn nav bar khi tắt lộ trình
-    document.getElementById('path-nav-bar').classList.remove('show');
+    // Đóng popup (giữ nguyên trạng thái discs)
+    popup.classList.remove('open');
+    document.getElementById('path-toggle-btn').classList.remove('active');
   }
 });
 
-/* ── PATH NAV BAR ── */
+/* ── PATH NAV POPUP LOGIC ── */
 let currentWpIdx = 0;
 
-function updatePathNavBar() {
-  var bar = document.getElementById('path-nav-bar');
-  if (pathWaypoints.length === 0 || !pathActive) { bar.classList.remove('show'); return; }
-  bar.classList.add('show');
+function updatePathPopup() {
+  if (pathWaypoints.length === 0) return;
   if (currentWpIdx >= pathWaypoints.length) currentWpIdx = pathWaypoints.length - 1;
   if (currentWpIdx < 0) currentWpIdx = 0;
-  var wp = pathWaypoints[currentWpIdx];
-  document.getElementById('pnb-num').textContent = (currentWpIdx + 1) + ' / ' + pathWaypoints.length;
-  document.getElementById('pnb-label').textContent = wp.label || ('Điểm ' + (currentWpIdx + 1));
-  document.getElementById('pnb-prev').disabled = (currentWpIdx <= 0);
-  document.getElementById('pnb-next').disabled = (currentWpIdx >= pathWaypoints.length - 1);
+  const wp = pathWaypoints[currentWpIdx];
+  document.getElementById('pnp-count').textContent = pathWaypoints.length + ' điểm';
+  document.getElementById('pnp-num').textContent   = (currentWpIdx + 1) + ' / ' + pathWaypoints.length;
+  document.getElementById('pnp-label').textContent = wp.label || ('Điểm ' + (currentWpIdx + 1));
+  document.getElementById('pnp-prev').disabled = (currentWpIdx <= 0);
+  document.getElementById('pnp-next').disabled = (currentWpIdx >= pathWaypoints.length - 1);
 }
 
-document.getElementById('pnb-prev').addEventListener('click', function() {
-  if (currentWpIdx > 0) { currentWpIdx--; travelToWaypoint(currentWpIdx); updatePathNavBar(); }
+function updateHideBtn() {
+  const btn = document.getElementById('pnp-hide-btn');
+  if (pathActive) {
+    btn.textContent = '👁 Ẩn lộ trình';
+    btn.classList.remove('path-hidden');
+  } else {
+    btn.textContent = '👁 Hiện lộ trình';
+    btn.classList.add('path-hidden');
+  }
+}
+
+document.getElementById('pnp-prev').addEventListener('click', function() {
+  if (currentWpIdx > 0) { currentWpIdx--; travelToWaypoint(currentWpIdx); updatePathPopup(); }
 });
-document.getElementById('pnb-next').addEventListener('click', function() {
-  if (currentWpIdx < pathWaypoints.length - 1) { currentWpIdx++; travelToWaypoint(currentWpIdx); updatePathNavBar(); }
+document.getElementById('pnp-next').addEventListener('click', function() {
+  if (currentWpIdx < pathWaypoints.length - 1) { currentWpIdx++; travelToWaypoint(currentWpIdx); updatePathPopup(); }
 });
-document.getElementById('pnb-close').addEventListener('click', function() {
-  document.getElementById('path-nav-bar').classList.remove('show');
-  // Tắt discs khi đóng nav bar
-  setPathVisible(false);
-  document.getElementById('path-toggle-btn').classList.remove('active');
+document.getElementById('pnp-hide-btn').addEventListener('click', function() {
+  setPathVisible(!pathActive);
+  updateHideBtn();
 });
 
-// Sync currentWpIdx khi khách bấm disc trực tiếp trên sàn
+// Sync index khi khách bấm disc trực tiếp trên sàn
 canvas.addEventListener('click', function() {
   if (!pathActive || !wpHoveredDisc) return;
-  var idx = wpHoveredDisc.userData.wpIdx;
-  if (idx !== undefined) { currentWpIdx = idx; updatePathNavBar(); }
+  const idx = wpHoveredDisc.userData.wpIdx;
+  if (idx !== undefined) {
+    currentWpIdx = idx;
+    updatePathPopup();
+    // Mở popup nếu đang đóng
+    const popup = document.getElementById('path-nav-popup');
+    if (!popup.classList.contains('open')) {
+      popup.classList.add('open');
+      document.getElementById('path-toggle-btn').classList.add('active');
+    }
+  }
 }, true);
 
 /* ─── PRODUCT LIST ─── */
