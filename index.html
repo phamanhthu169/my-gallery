@@ -670,6 +670,49 @@ body { background:#1a1714; overflow:hidden; font-family:var(--font-ui); }
 }
 #path-walk-hint.show { opacity:1; }
 
+/* ── PATH NAV BAR ── */
+#path-nav-bar {
+  position:absolute; bottom:14px; left:50%;
+  transform:translateX(-50%);
+  background:rgba(18,15,12,.96); border:.5px solid var(--accent);
+  border-radius:24px; padding:6px 10px;
+  display:none; align-items:center; gap:8px; z-index:25;
+  backdrop-filter:blur(10px);
+  box-shadow:0 4px 24px rgba(200,169,110,.18);
+}
+#path-nav-bar.show { display:flex; }
+.pnb-arrow {
+  width:32px; height:32px;
+  background:rgba(200,169,110,.1); border:.5px solid rgba(200,169,110,.35);
+  color:var(--accent); font-size:14px;
+  cursor:pointer; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  transition:all .2s; flex-shrink:0; line-height:1;
+}
+.pnb-arrow:hover { background:rgba(200,169,110,.3); border-color:var(--accent); color:#fff; transform:scale(1.08); }
+.pnb-arrow:disabled { opacity:.28; cursor:not-allowed; transform:none; }
+#pnb-info {
+  display:flex; flex-direction:column; align-items:center;
+  min-width:100px; gap:1px;
+}
+#pnb-num {
+  font-family:var(--font-head); font-size:13px; font-style:italic;
+  color:var(--accent); letter-spacing:.06em;
+}
+#pnb-label {
+  font-family:var(--font-mono); font-size:7px; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--gold-dim);
+  max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+#pnb-close {
+  width:22px; height:22px;
+  background:none; border:.5px solid rgba(212,197,169,.15);
+  color:var(--text-dim); font-size:8px; cursor:pointer;
+  border-radius:50%; display:flex; align-items:center; justify-content:center;
+  margin-left:2px; transition:all .2s; flex-shrink:0;
+}
+#pnb-close:hover { border-color:var(--border-hi); color:var(--gold-dim); }
+
 /* ══════════════════════════════════════
    LIKE BUTTON animation
 ══════════════════════════════════════ */
@@ -876,6 +919,17 @@ body { background:#1a1714; overflow:hidden; font-family:var(--font-ui); }
 
   <!-- RIGHT PANEL: product list -->
   <div id="controls-bar">W A S D · Kéo chuột để xoay · Click tranh để xem</div>
+
+  <!-- PATH NAV BAR -->
+  <div id="path-nav-bar">
+    <button class="pnb-arrow" id="pnb-prev" title="Điểm trước">&#9664;</button>
+    <div id="pnb-info">
+      <span id="pnb-num">1 / 1</span>
+      <span id="pnb-label">&#8212;</span>
+    </div>
+    <button class="pnb-arrow" id="pnb-next" title="Điểm tiếp theo">&#9654;</button>
+    <button id="pnb-close" title="Đóng">&#10005;</button>
+  </div>
 
   <!-- HELP OVERLAY -->
   <div id="help-overlay">
@@ -1336,6 +1390,9 @@ async function loadGallery() {
       const btn = document.getElementById('path-toggle-btn');
       btn.classList.add('active');
       btn.title = `${sd.pathWaypoints.length} điểm tham quan`;
+      // Hiện nav bar ngay từ đầu
+      currentWpIdx = 0;
+      updatePathNavBar();
     }
 
     // Khôi phục màu tường + giấy dán
@@ -1540,11 +1597,51 @@ document.getElementById('path-toggle-btn').addEventListener('click', () => {
     hint.classList.add('show');
     setTimeout(() => hint.classList.remove('show'), 4000);
     toast(`Lộ trình: ${pathWaypoints.length} điểm tham quan`, 'success', 2500);
+    // Hiện nav bar khi bật lộ trình
+    updatePathNavBar();
   } else {
     setPathVisible(false);
     btn.classList.remove('active');
+    // Ẩn nav bar khi tắt lộ trình
+    document.getElementById('path-nav-bar').classList.remove('show');
   }
 });
+
+/* ── PATH NAV BAR ── */
+let currentWpIdx = 0;
+
+function updatePathNavBar() {
+  var bar = document.getElementById('path-nav-bar');
+  if (pathWaypoints.length === 0 || !pathActive) { bar.classList.remove('show'); return; }
+  bar.classList.add('show');
+  if (currentWpIdx >= pathWaypoints.length) currentWpIdx = pathWaypoints.length - 1;
+  if (currentWpIdx < 0) currentWpIdx = 0;
+  var wp = pathWaypoints[currentWpIdx];
+  document.getElementById('pnb-num').textContent = (currentWpIdx + 1) + ' / ' + pathWaypoints.length;
+  document.getElementById('pnb-label').textContent = wp.label || ('Điểm ' + (currentWpIdx + 1));
+  document.getElementById('pnb-prev').disabled = (currentWpIdx <= 0);
+  document.getElementById('pnb-next').disabled = (currentWpIdx >= pathWaypoints.length - 1);
+}
+
+document.getElementById('pnb-prev').addEventListener('click', function() {
+  if (currentWpIdx > 0) { currentWpIdx--; travelToWaypoint(currentWpIdx); updatePathNavBar(); }
+});
+document.getElementById('pnb-next').addEventListener('click', function() {
+  if (currentWpIdx < pathWaypoints.length - 1) { currentWpIdx++; travelToWaypoint(currentWpIdx); updatePathNavBar(); }
+});
+document.getElementById('pnb-close').addEventListener('click', function() {
+  document.getElementById('path-nav-bar').classList.remove('show');
+  // Tắt discs khi đóng nav bar
+  setPathVisible(false);
+  document.getElementById('path-toggle-btn').classList.remove('active');
+});
+
+// Sync currentWpIdx khi khách bấm disc trực tiếp trên sàn
+canvas.addEventListener('click', function() {
+  if (!pathActive || !wpHoveredDisc) return;
+  var idx = wpHoveredDisc.userData.wpIdx;
+  if (idx !== undefined) { currentWpIdx = idx; updatePathNavBar(); }
+}, true);
 
 /* ─── PRODUCT LIST ─── */
 function renderProductList() {
