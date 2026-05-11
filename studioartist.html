@@ -222,7 +222,19 @@
 }
 .rsw-sep { width:.5px; height:16px; background:rgba(212,197,169,.15); flex-shrink:0; }
 
-/* ── REMOVE BUTTON ── */
+/* ── DOOR MODE TOOLTIP ── */
+#door-tooltip {
+  position:fixed; z-index:999; pointer-events:none;
+  background:rgba(15,13,12,.95); border:.5px solid var(--accent);
+  color:var(--accent); font-family:var(--font-ui); font-size:9px;
+  letter-spacing:.12em; text-transform:uppercase;
+  padding:6px 12px; border-radius:var(--radius);
+  white-space:nowrap; opacity:0; transition:opacity .15s;
+  box-shadow:0 2px 8px rgba(200,169,110,.3);
+}
+#door-tooltip.show { opacity:1; }
+
+
 .remove-btn { position:absolute; top:2px; right:2px; width:16px; height:16px; background:rgba(181,74,58,.85); color:#fff; font-size:8px; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .2s; border-radius:1px; }
 .uw > .item-wrap:hover .remove-btn { opacity:1; }
 .item-wrap { position:relative; }
@@ -510,6 +522,7 @@
     <button class="btn"        id="btn-select" data-tip="Click tranh để chỉnh sửa">✦ Select</button>
     <button class="btn"        id="btn-wall"   data-tip="Màu tường & giấy dán tường">🎨 Tường</button>
     <button class="btn"        id="btn-light"  data-tip="Điều chỉnh ánh sáng">💡 Light</button>
+    <button class="btn"        id="btn-door-mode" data-tip="Hover tường → click để thêm cửa thông">🚪 Cửa</button>
     <button class="btn"        id="btn-rooms"  data-tip="Thêm phòng / tầng / cửa">🏛 Rooms</button>
     <button class="btn"        id="btn-path"   data-tip="Tạo lộ trình tự động">🛤 Path</button>
     <button class="btn danger" id="btn-reset"  data-tip="Xoá tất cả">↺ Reset</button>
@@ -533,6 +546,9 @@
     <div class="uw" id="uw-3d"></div>
     <div id="hint">Chọn tác phẩm<br>→ bật Place<br>→ click sàn/tường<br><br>🏛 Rooms → thêm<br>phòng, cầu thang<br>cửa thông</div>
   </div>
+
+  <!-- Door Mode Tooltip -->
+  <div id="door-tooltip">🚪 Click để thêm cửa</div>
 
   <!-- Light Panel -->
   <div id="light-panel">
@@ -873,7 +889,7 @@ scene.add(ambLight); scene.add(hemiLight);
 
 /* ── MATERIALS ── */
 const floorMat = new THREE.MeshLambertMaterial({color:0x6b5a47});
-const wallMat  = new THREE.MeshLambertMaterial({color:0xd8d3ca});
+const wallMat  = new THREE.MeshLambertMaterial({color:0xd8d3ca, side:THREE.DoubleSide});
 const ceilMat  = new THREE.MeshLambertMaterial({color:0xe8e4de});
 const frameMat = new THREE.MeshLambertMaterial({color:0x1a1006});
 const skirtMat = new THREE.MeshLambertMaterial({color:0xc8c2b5});
@@ -959,17 +975,17 @@ function buildRoom(roomDef) {
     r.position.set(x+ox, fy+H-.12, z); scene.add(r); meshes.push(r);
   });
 
-  // Spotlights
+  // Spotlights — 4 đèn/phòng (giảm từ 9 để tránh lỗi MAX_TEXTURE_IMAGE_UNITS)
   const spots=[];
-  for(let xi=-1;xi<=1;xi++) for(let zi=-1;zi<=1;zi++){
-    const l = new THREE.SpotLight(0xffe0a0, 1.6, 18, Math.PI/5, .55, 1.3);
+  [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([xi,zi])=>{
+    const l = new THREE.SpotLight(0xffe0a0, 2.0, 18, Math.PI/5, .55, 1.3);
     l.position.set(x+xi*(w/3), fy+H-.15, z+zi*(d/3));
     l.target.position.set(x+xi*(w/3), fy, z+zi*(d/3));
-    l.castShadow=true; scene.add(l); scene.add(l.target);
+    l.castShadow=false; scene.add(l); scene.add(l.target);
     spots.push(l);
     const b = new THREE.Mesh(new THREE.SphereGeometry(.05,6,6), new THREE.MeshBasicMaterial({color:0xffddaa}));
     b.position.copy(l.position); scene.add(b); meshes.push(b);
-  }
+  });
 
   // Name label (3D sprite via DOM)
   roomDef.meshes    = meshes;
@@ -999,56 +1015,83 @@ function rebuildRoom(roomDef) {
 }
 
 // Add a door opening on a wall
-function addDoor(roomDef, dir, offsetX=0, offsetZ=0) {
+// doorCenter: world coordinate along the wall (X for N/S walls, Z for W/E walls)
+function addDoor(roomDef, dir, doorCenter) {
   const {x,z,w,d,floor} = roomDef;
   const fy = getFloorY(floor);
-  const H  = 5; const hw=w/2, hd=d/2;
-  const DW = 2.2, DH = 2.8; // door width/height
+  const H  = 5;
+  const hw = w/2, hd = d/2;
+  const DW = 2.2, DH = 2.8;
   const doorMeshes = roomDef.doorMeshes || [];
 
-  // Find wall mesh and replace with arch
-  const wallM = roomDef.wallMeshes.find(m=>m.userData.wallDir===dir);
+  // Remove original full wall
+  const wallM = roomDef.wallMeshes.find(m => m.userData.wallDir === dir);
   if (wallM) scene.remove(wallM);
 
-  // Wall panels beside/above door depending on direction
-  const buildDoorWall = (totalW, totalH, doorOffsetAlongWall, wx, wy, wz, ry) => {
-    const leftW  = (totalW/2 + doorOffsetAlongWall - DW/2);
-    const rightW = (totalW/2 - doorOffsetAlongWall - DW/2);
-    const aboveH = totalH - DH;
-    const makePanel = (pw, ph, ox, oy) => {
-      if (pw < 0.05 || ph < 0.05) return;
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), wallMat.clone());
-      m.position.set(wx+ox, wy+oy, wz); m.rotation.y=ry;
-      m.receiveShadow=true; scene.add(m); doorMeshes.push(m);
-    };
-    // Left slab
-    if(leftW>0) makePanel(leftW, totalH, -(rightW/2+DW/2), 0);
-    // Right slab
-    if(rightW>0) makePanel(rightW, totalH, (leftW/2+DW/2), 0);
-    // Above
-    if(aboveH>0) makePanel(DW, aboveH, doorOffsetAlongWall, (DH/2)+(aboveH/2)-totalH/2+totalH/2);
-
-    // Door frame
-    const frames=[
-      [DW+.16, .1, .12, doorOffsetAlongWall, fy+DH, 0],
-      [.1, DH, .12, doorOffsetAlongWall-DW/2-.05, fy+DH/2, 0],
-      [.1, DH, .12, doorOffsetAlongWall+DW/2+.05, fy+DH/2, 0],
-    ];
-    frames.forEach(([fw,fh,fd,ox,oy,oz])=>{
-      const fm = new THREE.Mesh(new THREE.BoxGeometry(fw,fh,fd), doorFrameMat);
-      fm.position.set(wx+ox, oy, wz+oz); fm.rotation.y=ry;
-      scene.add(fm); doorMeshes.push(fm);
-    });
+  const makeWallPanel = (px, py, pz, pw, ph, ry) => {
+    if (pw < 0.05 || ph < 0.05) return;
+    const mat = wallMat.clone(); mat.side = THREE.DoubleSide;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), mat);
+    m.position.set(px, py, pz);
+    m.rotation.y = ry;
+    m.receiveShadow = true;
+    scene.add(m); doorMeshes.push(m);
   };
 
-  const p = {N:{wx:x,wy:fy+H/2,wz:z-hd,ry:0,tw:w,th:H},
-              S:{wx:x,wy:fy+H/2,wz:z+hd,ry:Math.PI,tw:w,th:H},
-              W:{wx:x-hw,wy:fy+H/2,wz:z,ry:Math.PI/2,tw:d,th:H},
-              E:{wx:x+hw,wy:fy+H/2,wz:z,ry:-Math.PI/2,tw:d,th:H}}[dir];
-  if(!p) return;
-  buildDoorWall(p.tw, p.th, offsetX||offsetZ, p.wx, p.wy, p.wz, p.ry);
-  roomDef.doorMeshes = doorMeshes;
-  roomDef.doors.push({dir, offsetX, offsetZ});
+  const makeFrame = (px, py, pz, fw, fh, fd, ry) => {
+    const fm = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, fd), doorFrameMat);
+    fm.position.set(px, py, pz);
+    fm.rotation.y = ry;
+    scene.add(fm); doorMeshes.push(fm);
+  };
+
+  if (dir === 'N' || dir === 'S') {
+    // Wall runs along X axis; doorCenter is X position of door midpoint
+    const dc     = (doorCenter !== undefined) ? doorCenter : x;
+    // Clamp so door stays inside wall
+    const dcC    = Math.max(x - hw + DW/2 + 0.1, Math.min(x + hw - DW/2 - 0.1, dc));
+    const wz     = dir === 'N' ? z - hd : z + hd;
+    const ry     = dir === 'N' ? 0 : Math.PI;
+    const aboveH = H - DH;
+
+    // Left panel: from wall left edge to door left edge
+    const leftW  = dcC - DW/2 - (x - hw);
+    // Right panel: from door right edge to wall right edge
+    const rightW = (x + hw) - (dcC + DW/2);
+
+    if (leftW  > 0.05) makeWallPanel(x - hw + leftW/2,   fy + H/2,          wz, leftW,  H,      ry);
+    if (rightW > 0.05) makeWallPanel(x + hw - rightW/2,  fy + H/2,          wz, rightW, H,      ry);
+    if (aboveH > 0.05) makeWallPanel(dcC,                 fy + DH + aboveH/2, wz, DW,    aboveH, ry);
+
+    makeFrame(dcC,             fy + DH,   wz, DW + .18, .12, .12, ry);
+    makeFrame(dcC - DW/2-.06, fy + DH/2, wz, .12, DH,  .12, ry);
+    makeFrame(dcC + DW/2+.06, fy + DH/2, wz, .12, DH,  .12, ry);
+
+    roomDef.doorMeshes = doorMeshes;
+    roomDef.doors.push({dir, doorCenter: dcC});
+
+  } else {
+    // W or E — wall runs along Z axis; doorCenter is Z position of door midpoint
+    const dc     = (doorCenter !== undefined) ? doorCenter : z;
+    const dcC    = Math.max(z - hd + DW/2 + 0.1, Math.min(z + hd - DW/2 - 0.1, dc));
+    const wx     = dir === 'W' ? x - hw : x + hw;
+    const ry     = dir === 'W' ? Math.PI/2 : -Math.PI/2;
+    const aboveH = H - DH;
+
+    const leftW  = dcC - DW/2 - (z - hd);
+    const rightW = (z + hd) - (dcC + DW/2);
+
+    if (leftW  > 0.05) makeWallPanel(wx, fy + H/2,          z - hd + leftW/2,  leftW,  H,      ry);
+    if (rightW > 0.05) makeWallPanel(wx, fy + H/2,          z + hd - rightW/2, rightW, H,      ry);
+    if (aboveH > 0.05) makeWallPanel(wx, fy + DH + aboveH/2, dcC,               DW,    aboveH, ry);
+
+    makeFrame(wx, fy + DH,   dcC,             DW + .18, .12, .12, ry);
+    makeFrame(wx, fy + DH/2, dcC - DW/2-.06, .12, DH,  .12,      ry);
+    makeFrame(wx, fy + DH/2, dcC + DW/2+.06, .12, DH,  .12,      ry);
+
+    roomDef.doorMeshes = doorMeshes;
+    roomDef.doors.push({dir, doorCenter: dcC});
+  }
 }
 
 // Add staircase in room
@@ -1210,7 +1253,13 @@ function getCurrentCameraFloor() {
 /* ── ALL WALL MESHES (for raycasting) ── */
 function getAllWallMeshes() {
   const wm=[];
-  rooms.forEach(r=>r.wallMeshes.forEach(m=>wm.push(m)));
+  rooms.forEach(r => {
+    r.wallMeshes.forEach(m => wm.push(m));
+    // Include door panel meshes (PlaneGeometry only, not BoxGeometry frames)
+    if (r.doorMeshes) r.doorMeshes.forEach(m => {
+      if (m.geometry && m.geometry.type === 'PlaneGeometry') wm.push(m);
+    });
+  });
   return wm;
 }
 function getAllFloorPlanes() {
@@ -1897,6 +1946,78 @@ function drawFloorPlan() {
   }
 }
 
+/* ── COLLISION DETECTION ── */
+function canMoveTo(pos) {
+  const cFloor = getCurrentCameraFloor();
+  const PLAYER_R = 0.30;
+  const DW = 2.2;
+  const DOOR_HALF = DW / 2 - 0.1;
+  const WALL_THICK = 0.5; // shared wall tolerance
+
+  // Get door center for a wall direction of a room (null = no door = solid wall)
+  const getDC = (room, dir) => {
+    const door = room.doors ? room.doors.find(d => d.dir === dir) : null;
+    if (!door) return null;
+    if (door.doorCenter !== undefined && door.doorCenter !== null) return door.doorCenter;
+    return (dir === 'N' || dir === 'S') ? room.x : room.z;
+  };
+
+  // Check if wall is passable at a given "along" position
+  // A wall is passable if:
+  //   a) this room has a door here, OR
+  //   b) the adjacent room on the other side also has a door on its facing wall at same spot
+  const isPassable = (room, dir, along) => {
+    const dc = getDC(room, dir);
+    if (dc !== null && Math.abs(along - dc) < DOOR_HALF) return true;
+
+    // Check adjacent room's opposite wall
+    const opposite = {N:'S', S:'N', E:'W', W:'E'};
+    const opp = opposite[dir];
+    for (const other of rooms) {
+      if (other === room || other.floor !== cFloor) continue;
+      // Is other room touching this wall?
+      let wallMatches = false;
+      if (dir === 'E' && Math.abs((room.x + room.w/2) - (other.x - other.w/2)) < WALL_THICK) wallMatches = true;
+      if (dir === 'W' && Math.abs((room.x - room.w/2) - (other.x + other.w/2)) < WALL_THICK) wallMatches = true;
+      if (dir === 'N' && Math.abs((room.z - room.d/2) - (other.z + other.d/2)) < WALL_THICK) wallMatches = true;
+      if (dir === 'S' && Math.abs((room.z + room.d/2) - (other.z - other.d/2)) < WALL_THICK) wallMatches = true;
+      if (!wallMatches) continue;
+
+      const dc2 = getDC(other, opp);
+      if (dc2 !== null && Math.abs(along - dc2) < DOOR_HALF) return true;
+    }
+    return false;
+  };
+
+  for (const room of rooms) {
+    if (room.floor !== cFloor) continue;
+    const rx = room.x, rz = room.z;
+    const hw = room.w / 2, hd = room.d / 2;
+
+    const nearX = pos.x > rx - hw - 1.5 && pos.x < rx + hw + 1.5;
+    const nearZ = pos.z > rz - hd - 1.5 && pos.z < rz + hd + 1.5;
+    if (!nearX || !nearZ) continue;
+
+    // N wall
+    if (Math.abs(pos.z - (rz - hd)) < PLAYER_R && pos.x > rx-hw && pos.x < rx+hw) {
+      if (!isPassable(room, 'N', pos.x)) return false;
+    }
+    // S wall
+    if (Math.abs(pos.z - (rz + hd)) < PLAYER_R && pos.x > rx-hw && pos.x < rx+hw) {
+      if (!isPassable(room, 'S', pos.x)) return false;
+    }
+    // W wall
+    if (Math.abs(pos.x - (rx - hw)) < PLAYER_R && pos.z > rz-hd && pos.z < rz+hd) {
+      if (!isPassable(room, 'W', pos.z)) return false;
+    }
+    // E wall
+    if (Math.abs(pos.x - (rx + hw)) < PLAYER_R && pos.z > rz-hd && pos.z < rz+hd) {
+      if (!isPassable(room, 'E', pos.z)) return false;
+    }
+  }
+  return true;
+}
+
 /* ── ANIMATE ── */
 function animate() {
   requestAnimationFrame(animate);
@@ -1910,11 +2031,23 @@ function animate() {
   }
   if(dir3.length()>0){
     dir3.normalize().applyEuler(new THREE.Euler(0,yaw,0));
-    camera.position.addScaledVector(dir3,.07);
-    const b=getCameraRoomBounds();
-    camera.position.x=Math.max(b.minX,Math.min(b.maxX,camera.position.x));
-    camera.position.z=Math.max(b.minZ,Math.min(b.maxZ,camera.position.z));
-    camera.position.y=getFloorY(getCurrentCameraFloor())+1.7;
+    const SPEED = 0.07;
+    const oldX = camera.position.x, oldZ = camera.position.z;
+    const newX = oldX + dir3.x * SPEED;
+    const newZ = oldZ + dir3.z * SPEED;
+
+    // Try X then Z separately (sliding collision)
+    const posX = new THREE.Vector3(newX, camera.position.y, oldZ);
+    const posZ = new THREE.Vector3(oldX, camera.position.y, newZ);
+    const posFull = new THREE.Vector3(newX, camera.position.y, newZ);
+
+    camera.position.x = canMoveTo(posX) ? newX : oldX;
+    camera.position.z = canMoveTo(posZ) ? newZ : oldZ;
+
+    const b = getCameraRoomBounds();
+    camera.position.x = Math.max(b.minX, Math.min(b.maxX, camera.position.x));
+    camera.position.z = Math.max(b.minZ, Math.min(b.maxZ, camera.position.z));
+    camera.position.y = getFloorY(getCurrentCameraFloor()) + 1.7;
   }
   artworks.forEach(a=>{ if(a.isVideo&&a.tex) a.tex.needsUpdate=true; });
   models3d.forEach(m=>{ m.object.rotation.y+=.005; });
@@ -2018,6 +2151,7 @@ function removeWallpaper(mesh) {
 
 function enterPaintMode(type) {
   paintMode = type; // 'color' or 'wallpaper'
+  if (typeof exitDoorMode === 'function') exitDoorMode();
   setPaintCursor(true);
   // Update button states
   document.getElementById('btn-paint-mode').classList.toggle('active', type === 'color');
@@ -2100,6 +2234,160 @@ canvas.addEventListener('contextmenu', e => {
 document.getElementById('btn-walk').addEventListener('click', exitPaintMode, true);
 document.getElementById('btn-place').addEventListener('click', exitPaintMode, true);
 document.getElementById('btn-select').addEventListener('click', exitPaintMode, true);
+
+/* ══════════════════════════════════════
+   DOOR MODE — hover tường → click thêm cửa thông
+══════════════════════════════════════ */
+let doorMode = false;
+let doorHoveredWall = null;
+let doorHoverOrigColor = null;
+const doorTooltip = document.getElementById('door-tooltip');
+
+function enterDoorMode() {
+  doorMode = true;
+  exitPaintMode();
+  document.getElementById('btn-door-mode').classList.add('active');
+  toast('🚪 Di chuột vào tường → Click để tạo cửa · ESC để thoát', 'info', 4000);
+  // Custom cursor
+  document.getElementById('paint-cursor-style').textContent =
+    `#c { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E🚪%3C/text%3E%3C/svg%3E") 4 28, crosshair !important; }`;
+}
+
+function exitDoorMode() {
+  doorMode = false;
+  clearDoorHover();
+  document.getElementById('btn-door-mode').classList.remove('active');
+  document.getElementById('paint-cursor-style').textContent = '';
+  doorTooltip.classList.remove('show');
+}
+
+function clearDoorHover() {
+  if (doorHoveredWall) {
+    doorHoveredWall.material.color.set(doorHoverOrigColor);
+    doorHoveredWall.material.needsUpdate = true;
+    doorHoveredWall = null;
+    doorHoverOrigColor = null;
+  }
+}
+
+// Mousemove: highlight wall + show tooltip
+canvas.addEventListener('mousemove', e => {
+  if (!doorMode) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+  const my = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+  raycaster.setFromCamera(new THREE.Vector2(mx, my), camera);
+
+  const allWalls = getAllWallMeshes();
+  const hits = raycaster.intersectObjects(allWalls);
+
+  if (hits.length) {
+    const mesh = hits[0].object;
+    const dir = mesh.userData.wallDir;
+    const roomId = mesh.userData.roomId;
+    const room = rooms.find(r => r.id === roomId);
+
+    // Check if wall already has a door
+    const alreadyHasDoor = room && room.doors && room.doors.some(d => d.dir === dir);
+
+    if (mesh !== doorHoveredWall) {
+      clearDoorHover();
+      doorHoveredWall = mesh;
+      doorHoverOrigColor = mesh.material.color.getHex();
+      // Highlight orange
+      mesh.material.color.set(alreadyHasDoor ? 0xcc5555 : 0xd4a855);
+      mesh.material.needsUpdate = true;
+    }
+
+    // Move tooltip near cursor
+    doorTooltip.textContent = alreadyHasDoor
+      ? '✕ Cửa đã tồn tại ở tường này'
+      : `🚪 Click để tạo cửa thông (tường ${dir || '?'})`;
+    doorTooltip.style.left = (e.clientX + 14) + 'px';
+    doorTooltip.style.top  = (e.clientY - 10) + 'px';
+    doorTooltip.classList.add('show');
+  } else {
+    clearDoorHover();
+    doorTooltip.classList.remove('show');
+  }
+});
+
+// Click: add door on hovered wall
+canvas.addEventListener('click', e => {
+  if (!doorMode) return;
+  if (!doorHoveredWall) return;
+  e.stopImmediatePropagation();
+
+  const dir    = doorHoveredWall.userData.wallDir;
+  const roomId = doorHoveredWall.userData.roomId;
+  const room   = rooms.find(r => r.id === roomId);
+  if (!room || !dir) return;
+
+  if (room.doors && room.doors.some(d => d.dir === dir)) {
+    toast('Tường này đã có cửa rồi!', 'error'); return;
+  }
+
+  // Raycast to get exact hit point on wall → pass as doorCenter
+  const rect2 = canvas.getBoundingClientRect();
+  const mx2 = ((e.clientX - rect2.left) / rect2.width)  * 2 - 1;
+  const my2 = -((e.clientY - rect2.top)  / rect2.height) * 2 + 1;
+  raycaster.setFromCamera(new THREE.Vector2(mx2, my2), camera);
+  const hits = raycaster.intersectObject(doorHoveredWall);
+  let doorCenter;
+  if (hits.length) {
+    const pt = hits[0].point;
+    // For N/S walls the door slides along X; for W/E walls along Z
+    doorCenter = (dir === 'N' || dir === 'S') ? pt.x : pt.z;
+  }
+
+  addDoor(room, dir, doorCenter);
+
+  // Auto-mirror: tìm phòng kề sát tường này và đục cửa đối diện
+  const opposite = {N:'S', S:'N', E:'W', W:'E'};
+  const oppDir = opposite[dir];
+  const WALL_THICK = 0.6;
+  for (const other of rooms) {
+    if (other === room || other.floor !== room.floor) continue;
+    let adjacent = false;
+    if (dir === 'E' && Math.abs((room.x + room.w/2) - (other.x - other.w/2)) < WALL_THICK) adjacent = true;
+    if (dir === 'W' && Math.abs((room.x - room.w/2) - (other.x + other.w/2)) < WALL_THICK) adjacent = true;
+    if (dir === 'S' && Math.abs((room.z + room.d/2) - (other.z - other.d/2)) < WALL_THICK) adjacent = true;
+    if (dir === 'N' && Math.abs((room.z - room.d/2) - (other.z + other.d/2)) < WALL_THICK) adjacent = true;
+    if (!adjacent) continue;
+    // Chỉ tạo nếu chưa có cửa
+    if (other.doors && other.doors.some(d => d.dir === oppDir)) continue;
+    addDoor(other, oppDir, doorCenter);
+    toast(`✓ Đã tạo cửa thông "${room.name}" ↔ "${other.name}"`, 'success');
+    drawFloorPlan();
+    doorHoveredWall = null;
+    doorHoverOrigColor = null;
+    doorTooltip.classList.remove('show');
+    return;
+  }
+
+  drawFloorPlan();
+  toast(`✓ Đã tạo cửa tường ${dir} cho "${room.name}"`, 'success');
+
+  doorHoveredWall = null;
+  doorHoverOrigColor = null;
+  doorTooltip.classList.remove('show');
+}, true);
+
+document.getElementById('btn-door-mode').addEventListener('click', () => {
+  if (doorMode) exitDoorMode();
+  else enterDoorMode();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && doorMode) exitDoorMode();
+});
+
+// Exit door mode when switching other modes
+document.getElementById('btn-walk').addEventListener('click', exitDoorMode, true);
+document.getElementById('btn-place').addEventListener('click', exitDoorMode, true);
+document.getElementById('btn-select').addEventListener('click', exitDoorMode, true);
+
+
 
 // Esc key to exit
 document.addEventListener('keydown', e => {
@@ -2537,7 +2825,7 @@ async function loadGallery() {
         rooms.push(r);
         buildRoom(r);
         // Thêm cửa lại
-        if(rd.doors&&rd.doors.length>0) rd.doors.forEach(door=>addDoor(r,door.dir));
+        if(rd.doors&&rd.doors.length>0) rd.doors.forEach(door=>addDoor(r,door.dir,door.doorCenter));
       });
       // Đồng bộ roomIdCounter để không bị trùng id
       roomIdCounter = Math.max(...rooms.map(r=>r.id)) + 1;
